@@ -15,9 +15,10 @@ export default function JobsPage() {
           <div style={{ color: "var(--muted)" }}>Select a job to manage systems + create LEAF snapshots</div>
         </div>
 
-        <button className="rei-btn rei-btnPrimary" type="button" disabled>
-          + Create Job
-        </button>
+        <Link className="rei-btn rei-btnPrimary" href="/admin/jobs/new" style={{ textDecoration: "none" }}>
+  + Create Job
+</Link>
+
       </div>
 
       <div style={{ height: 14 }} />
