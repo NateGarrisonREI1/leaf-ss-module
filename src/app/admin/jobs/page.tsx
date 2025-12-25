@@ -1,5 +1,9 @@
+"use client";
+
 import Link from "next/link";
-import { MOCK_JOBS } from "../_data/mockJobs";
+import { useEffect, useMemo, useState } from "react";
+import { MOCK_JOBS, type Job } from "../_data/mockJobs";
+import { loadLocalJobs } from "../_data/localJobs";
 
 function formatDate(iso: string) {
   const d = new Date(iso);
@@ -7,18 +11,29 @@ function formatDate(iso: string) {
 }
 
 export default function JobsPage() {
+  const [localJobs, setLocalJobs] = useState<Job[]>([]);
+
+  useEffect(() => {
+    setLocalJobs(loadLocalJobs());
+  }, []);
+
+  const allJobs = useMemo(() => {
+    // local jobs first, then mock jobs that aren’t duplicates
+    const localIds = new Set(localJobs.map((j) => j.id));
+    return [...localJobs, ...MOCK_JOBS.filter((j) => !localIds.has(j.id))];
+  }, [localJobs]);
+
   return (
     <div className="rei-card">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <div>
           <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 6 }}>Jobs</div>
-          <div style={{ color: "var(--muted)" }}>Select a job to manage systems + create LEAF snapshots</div>
+          <div style={{ color: "var(--muted)" }}>Create a job → upload inspection → fill worksheet → generate snapshot</div>
         </div>
 
         <Link className="rei-btn rei-btnPrimary" href="/admin/jobs/new" style={{ textDecoration: "none" }}>
-  + Create Job
-</Link>
-
+          + Create Job
+        </Link>
       </div>
 
       <div style={{ height: 14 }} />
@@ -42,7 +57,7 @@ export default function JobsPage() {
           <div>Updated</div>
         </div>
 
-        {MOCK_JOBS.map((job) => (
+        {allJobs.map((job) => (
           <Link
             key={job.id}
             href={`/admin/jobs/${job.id}`}
@@ -66,7 +81,7 @@ export default function JobsPage() {
 
       <div style={{ height: 10 }} />
       <div style={{ fontSize: 12, color: "var(--muted)" }}>
-        Mock data for now. Next we’ll wire this to Supabase and enable <b>Create Job</b>.
+        Jobs created via <b>Create Job</b> are stored in your browser (localStorage) for now.
       </div>
     </div>
   );
