@@ -1,5 +1,5 @@
 import "./admin.css";
-import Link from "next/link";
+import SidebarNav from "./_components/SidebarNav";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -16,28 +16,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </div>
           </div>
 
-          {/* Nav */}
-          <nav className="rei-nav">
-            <Link className="rei-navItem" href="/admin">
-              <span className="rei-icon" aria-hidden="true">🏠</span>
-              <span>Home</span>
-            </Link>
-
-            <Link className="rei-navItem" href="/admin/customers">
-              <span className="rei-icon" aria-hidden="true">👤</span>
-              <span>Customers</span>
-            </Link>
-
-            <Link className="rei-navItem" href="/admin/jobs">
-              <span className="rei-icon" aria-hidden="true">🧾</span>
-              <span>Jobs</span>
-            </Link>
-
-            <Link className="rei-navItem" href="/admin/snapshots">
-              <span className="rei-icon" aria-hidden="true">🧩</span>
-              <span>LEAF System Snapshots</span>
-            </Link>
-          </nav>
+          {/* Nav (ACTIVE highlighting now works) */}
+          <SidebarNav />
 
           <div style={{ marginTop: "auto", fontSize: 12, color: "var(--muted)", padding: "14px 8px 0" }}>
             <div style={{ fontWeight: 800 }}>v0 (scaffold)</div>
@@ -46,7 +26,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
         {/* MAIN */}
         <section className="rei-main">
-          {/* Top bar (simple for now; we’ll add titles later) */}
           <header className="rei-topbar">
             <div>
               <div className="rei-title">REI Admin</div>
