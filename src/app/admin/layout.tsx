@@ -1,68 +1,63 @@
+import "./admin.css";
 import Link from "next/link";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "270px 1fr",
-        minHeight: "100vh",
-        fontFamily:
-          "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial",
-        background: "#f6f7fb",
-        color: "#101828",
-      }}
-    >
-      {/* SIDEBAR */}
-      <aside
-        style={{
-          background: "#fff",
-          borderRight: "1px solid #e7e9f0",
-          padding: "18px 14px",
-        }}
-      >
-        {/* Brand */}
-        <div style={{ display: "flex", alignItems: "center", gap: 12, paddingBottom: 14 }}>
-          <div
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 12,
-              background: "rgba(67,164,25,.12)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontWeight: 900,
-              color: "#43a419",
-            }}
-          >
-            REI
-          </div>
-          <div>
-            <div style={{ fontWeight: 900, fontSize: 14 }}>
-              Renewable Energy Incentives
-            </div>
-            <div style={{ fontSize: 12, color: "#667085" }}>
-              Management Console
+    <div className="rei-admin">
+      <div className="rei-shell">
+        {/* SIDEBAR */}
+        <aside className="rei-sidebar">
+          {/* Brand */}
+          <div className="rei-brand">
+            <div className="rei-brandMark">REI</div>
+            <div className="rei-brandText">
+              <strong>Renewable Energy Incentives</strong>
+              <span>Management Console</span>
             </div>
           </div>
-        </div>
 
-        {/* Nav */}
-        <nav style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <Link href="/admin">Home</Link>
-          <Link href="/admin/customers">Customers</Link>
-          <Link href="/admin/jobs">Jobs</Link>
-          <Link href="/admin/snapshots">LEAF System Snapshots</Link>
-        </nav>
+          {/* Nav */}
+          <nav className="rei-nav">
+            <Link className="rei-navItem" href="/admin">
+              <span className="rei-icon" aria-hidden="true">🏠</span>
+              <span>Home</span>
+            </Link>
 
-        <div style={{ marginTop: "auto", fontSize: 12, color: "#667085", paddingTop: 16 }}>
-          v0 (scaffold)
-        </div>
-      </aside>
+            <Link className="rei-navItem" href="/admin/customers">
+              <span className="rei-icon" aria-hidden="true">👤</span>
+              <span>Customers</span>
+            </Link>
 
-      {/* MAIN */}
-      <main style={{ padding: 24 }}>{children}</main>
+            <Link className="rei-navItem" href="/admin/jobs">
+              <span className="rei-icon" aria-hidden="true">🧾</span>
+              <span>Jobs</span>
+            </Link>
+
+            <Link className="rei-navItem" href="/admin/snapshots">
+              <span className="rei-icon" aria-hidden="true">🧩</span>
+              <span>LEAF System Snapshots</span>
+            </Link>
+          </nav>
+
+          <div style={{ marginTop: "auto", fontSize: 12, color: "var(--muted)", padding: "14px 8px 0" }}>
+            <div style={{ fontWeight: 800 }}>v0 (scaffold)</div>
+          </div>
+        </aside>
+
+        {/* MAIN */}
+        <section className="rei-main">
+          {/* Top bar (simple for now; we’ll add titles later) */}
+          <header className="rei-topbar">
+            <div>
+              <div className="rei-title">REI Admin</div>
+              <div className="rei-subtitle">LEAF System Snapshot console</div>
+            </div>
+            <div className="rei-avatar">N</div>
+          </header>
+
+          <div className="rei-content">{children}</div>
+        </section>
+      </div>
     </div>
   );
 }
