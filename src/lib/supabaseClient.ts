@@ -1,13 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  // This prevents silent failures during deploy/runtime
-  throw new Error(
-    "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY env vars"
-  );
-}
-
+// Don't hard-throw during build; just create the client.
+// (If env vars are missing at runtime, auth calls will fail, but builds won't.)
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
