@@ -2,9 +2,10 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import type { Job } from "../../_data/mockJobs";
+import { upsertLocalJob } from "../../_data/localJobs";
 
 function makeMockJobId() {
-  // simple deterministic-ish id (mock only)
   const n = Math.floor(Math.random() * 9000) + 1000;
   return `job_${n}`;
 }
@@ -29,20 +30,22 @@ export default function NewJobPage() {
     e.preventDefault();
     if (!canSubmit) return;
 
-    // MOCK: In the next phase, we’ll insert into Supabase and use the returned id.
     const jobId = makeMockJobId();
+    const now = new Date().toISOString();
 
-    // For now we just route to the job page and pass fields in the querystring
-    // so you can see the data "carried through" even before persistence.
-    const qs = new URLSearchParams({
-      customerName,
-      address,
-      sqft,
-      yearBuilt,
-      reportId,
-    });
+    const job: Job = {
+      id: jobId,
+      reportId: reportId.trim() || jobId,
+      customerName: customerName.trim(),
+      address: address.trim() || undefined,
+      sqft: sqft.trim() ? Number(sqft) : undefined,
+      yearBuilt: yearBuilt.trim() ? Number(yearBuilt) : undefined,
+      createdAt: now,
+      systems: [], // worksheet will populate this later
+    };
 
-    router.push(`/admin/jobs/${jobId}?${qs.toString()}`);
+    upsertLocalJob(job);
+    router.push(`/admin/jobs/${jobId}`);
   }
 
   return (
