@@ -8,15 +8,16 @@ import { MOCK_JOBS, type Job } from "../../_data/mockJobs";
 import { findLocalJob } from "../../_data/localJobs";
 import { upsertLocalSnapshot, type SnapshotDraft } from "../../_data/localSnapshots";
 
-// ✅ Your catalog file:
+// ✅ Catalog
 import * as CatalogModule from "../../_data/mockSystems";
 
-// ✅ Incentives rules (NO routing / reports touched)
+// ✅ Incentives
 import {
   getIncentivesForSystemType,
   INCENTIVE_COPY,
   type IncentiveResource,
   type IncentiveAmount,
+  normalizeSystemType,
 } from "../../../../lib/incentives/incentiveRules";
 
 type CatalogItem = {
@@ -31,6 +32,10 @@ type CatalogItem = {
   defaultSavingsYr?: number | null;
   defaultPaybackYears?: number | null;
   defaultNotes?: string;
+
+  // ✅ NEW: inferred system type + tags used for incentives matching
+  systemTypeKey: string; // e.g. "hvac" | "water_heater" | etc (normalized)
+  incentiveTags: string[]; // e.g. ["heat_pump","ducted"]
 };
 
 const FALLBACK_CATALOG: CatalogItem[] = [
@@ -43,6 +48,8 @@ const FALLBACK_CATALOG: CatalogItem[] = [
     defaultSavingsYr: 900,
     defaultPaybackYears: 12,
     defaultNotes: "Verify electrical capacity, duct condition, and sizing.",
+    systemTypeKey: "hvac",
+    incentiveTags: ["heat_pump", "ducted"],
   },
 ];
 
@@ -97,6 +104,33 @@ function firstNumber(...vals: any[]): number | null {
     if (mid !== null) return mid;
   }
   return null;
+}
+
+function keywordTagsFromName(name: string): { systemTypeKey: string; tags: string[] } {
+  const s = (name || "").toLowerCase();
+
+  const tags: string[] = [];
+
+  // system type inference
+  let systemTypeKey = normalizeSystemType(name);
+
+  // tag inference
+  if (s.includes("heat pump")) tags.push("heat_pump");
+  if (s.includes("ducted")) tags.push("ducted");
+  if (s.includes("ductless") || s.includes("mini split") || s.includes("mini-split")) tags.push("ductless");
+
+  if (s.includes("water heater") || s.includes("water-heater")) systemTypeKey = "water_heater";
+  if (s.includes("tankless")) tags.push("tankless");
+  if (s.includes("heat pump water heater") || s.includes("hpwh")) tags.push("hpwh");
+
+  if (s.includes("insulation")) systemTypeKey = "insulation";
+  if (s.includes("window")) systemTypeKey = "windows";
+  if (s.includes("door")) systemTypeKey = "doors";
+  if (s.includes("lighting")) systemTypeKey = "lighting";
+  if (s.includes("solar")) systemTypeKey = "solar";
+  if (s.includes("ev") || s.includes("charger")) systemTypeKey = "ev_charging";
+
+  return { systemTypeKey: normalizeSystemType(systemTypeKey), tags: Array.from(new Set(tags)) };
 }
 
 function normalizeCatalog(raw: any[]): CatalogItem[] {
@@ -195,6 +229,23 @@ function normalizeCatalog(raw: any[]): CatalogItem[] {
         .trim()
         .slice(0, 5000);
 
+      // ✅ NEW: system type + tags come from:
+      // 1) Catalog schema "category" if available
+      // 2) Catalog-provided incentiveTags/tags if available
+      // 3) Fallback inference from name
+      const inferred = keywordTagsFromName(name);
+
+      const categoryRaw = x.category ? String(x.category) : "";
+      const categoryKey = categoryRaw ? normalizeSystemType(categoryRaw) : inferred.systemTypeKey;
+
+      const providedTags: string[] = []
+        .concat(x.incentiveTags ?? [])
+        .concat(x.tags ?? [])
+        .map((t: any) => String(t || "").trim().toLowerCase())
+        .filter(Boolean);
+
+      const incentiveTags = Array.from(new Set([...inferred.tags, ...providedTags]));
+
       return {
         id,
         name,
@@ -204,6 +255,8 @@ function normalizeCatalog(raw: any[]): CatalogItem[] {
         defaultSavingsYr,
         defaultPaybackYears,
         defaultNotes: defaultNotes || undefined,
+        systemTypeKey: categoryKey,
+        incentiveTags,
       } as CatalogItem;
     })
     .filter((c: CatalogItem) => !!c?.id && !!c?.name);
@@ -262,13 +315,8 @@ function buildIncentivesNotesBlock(selected: IncentiveResource[]) {
     lines.push("");
   }
 
-  // small helper blurbs (kept short)
-  if (fedBlurb) {
-    lines.push(`• ${fedBlurb}`);
-  }
-  if (utilBlurb) {
-    lines.push(`• ${utilBlurb}`);
-  }
+  if (fedBlurb) lines.push(`• ${fedBlurb}`);
+  if (utilBlurb) lines.push(`• ${utilBlurb}`);
   lines.push("");
 
   for (const r of selected) {
@@ -319,36 +367,37 @@ export default function NewSnapshotClient({
     return catalog.find((c) => c.id === catalogId) ?? null;
   }, [catalogId, catalog]);
 
-  // ---------------- Incentives integration (same page / same "backend") ----------------
+  // ---------------- Incentives integration (MATCHES SUGGESTED UPGRADE ONLY) ----------------
   const incentives: IncentiveResource[] = useMemo(() => {
-    if (!existingSystem) return [];
-  const tags: string[] = [
-  existingSystem.subtype,
-  // Some datasets have a fuel-like field; don't break types if it's missing.
-  (existingSystem as any).fuel,
-  (existingSystem as any).fuelType,
-  (existingSystem as any).fuelSource,
-  existingSystem.type,
-]
-  .map((x: any) => String(x || "").trim())
-  .filter(Boolean);
+    // ✅ Only show/apply incentives when a suggested upgrade is selected from catalog
+    if (!selectedCatalog) return [];
 
-    return getIncentivesForSystemType(existingSystem.type || "", { tags });
-  }, [existingSystem]);
+    // Tags come from the chosen catalog item + any existing-system context if present
+    const tags: string[] = [
+      ...(selectedCatalog.incentiveTags ?? []),
+      // keep these optional - won’t break types
+      String((existingSystem as any)?.subtype ?? "").trim(),
+      String((existingSystem as any)?.type ?? "").trim(),
+    ]
+      .map((t) => (t || "").toLowerCase().trim())
+      .filter(Boolean);
 
-  // default: include everything we find
+    return getIncentivesForSystemType(selectedCatalog.systemTypeKey, { tags });
+  }, [selectedCatalog, existingSystem]);
+
   const [includeIncentivesInNotes, setIncludeIncentivesInNotes] = useState(true);
+
   const [selectedIncentiveIds, setSelectedIncentiveIds] = useState<string[]>(() => []);
 
-  // initialize selection once incentives load
+  // ✅ When incentives list changes (because catalog selection changed), auto-select all
   useMemo(() => {
-    if (!incentives.length) return;
-    // only auto-set if user hasn't touched yet
-    if (selectedIncentiveIds.length === 0) {
-      setSelectedIncentiveIds(incentives.map((x) => x.id));
+    if (!incentives.length) {
+      setSelectedIncentiveIds([]);
+      return;
     }
+    setSelectedIncentiveIds(incentives.map((x) => x.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [incentives]);
+  }, [catalogId, incentives.length]);
 
   const selectedIncentives = useMemo(() => {
     const set = new Set(selectedIncentiveIds);
@@ -376,10 +425,8 @@ export default function NewSnapshotClient({
   function applyCatalogDefaults() {
     if (!selectedCatalog) return;
 
-    // name: only fill if blank
     setSuggestedName((prev) => (prev.trim() ? prev : selectedCatalog.name));
 
-    // overwrite numeric fields so it’s obvious
     setEstCost(
       selectedCatalog.defaultCost !== null && selectedCatalog.defaultCost !== undefined
         ? String(selectedCatalog.defaultCost)
@@ -396,7 +443,6 @@ export default function NewSnapshotClient({
         : ""
     );
 
-    // append catalog notes if present
     setNotes((prev) => {
       const base = prev.trim();
       const catNotes = selectedCatalog.defaultNotes?.trim() ?? "";
@@ -417,7 +463,6 @@ export default function NewSnapshotClient({
 
     const userNotes = notes.trim();
 
-    // ✅ "backend stuff" happens right here, on create
     const incentivesBlock =
       includeIncentivesInNotes && selectedIncentives.length
         ? buildIncentivesNotesBlock(selectedIncentives)
@@ -591,88 +636,90 @@ export default function NewSnapshotClient({
 
             {selectedCatalog ? (
               <div style={{ color: "var(--muted)", fontSize: 12 }}>
-                {selectedCatalog.replaces ? <>From catalog • Replaces {selectedCatalog.replaces}</> : "From catalog"}
-                {selectedCatalog.benefits ? <> • {selectedCatalog.benefits}</> : null}
+                From catalog • Incentive type: <b>{selectedCatalog.systemTypeKey}</b>
+                {selectedCatalog.incentiveTags?.length ? (
+                  <> • tags: <b>{selectedCatalog.incentiveTags.join(", ")}</b></>
+                ) : null}
               </div>
             ) : (
               <div style={{ color: "var(--muted)", fontSize: 12 }}>
-                Catalog numbers are starting assumptions. You can override everything below.
+                Select a suggested upgrade to see matching incentives.
               </div>
             )}
           </div>
 
-          {/* ✅ Incentives section */}
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 14, padding: 12, background: "white" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-              <div style={{ fontWeight: 900 }}>Incentives (auto)</div>
-
-              <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700 }}>
-                <input
-                  type="checkbox"
-                  checked={includeIncentivesInNotes}
-                  onChange={(e) => setIncludeIncentivesInNotes(e.target.checked)}
-                />
-                Include incentives in snapshot notes on save
-              </label>
-            </div>
-
-            {incentives.length ? (
-              <>
-                <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 6 }}>
-                  Pulled from incentives rules for: <b>{existingSystem.type}</b>
-                  {incentiveSum ? (
-                    <> • Est. numeric rebates: <b>${incentiveSum.min}–${incentiveSum.max}</b></>
-                  ) : null}
+          {/* ✅ Incentives only show if a suggested upgrade is selected AND incentives matched */}
+          {selectedCatalog && incentives.length ? (
+            <div style={{ border: "1px solid #e5e7eb", borderRadius: 14, padding: 12, background: "white" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ fontWeight: 900 }}>
+                  Incentives (matched to suggested upgrade)
                 </div>
 
-                <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                  {incentives.map((r) => {
-                    const checked = selectedIncentiveIds.includes(r.id);
-                    const amt = formatAmount(r.amount);
-                    return (
-                      <label
-                        key={r.id}
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "20px 1fr",
-                          gap: 10,
-                          alignItems: "start",
-                          padding: 10,
-                          borderRadius: 12,
-                          border: "1px solid #eef2f7",
-                          background: "#fafafa",
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={(e) => {
-                            const next = new Set(selectedIncentiveIds);
-                            if (e.target.checked) next.add(r.id);
-                            else next.delete(r.id);
-                            setSelectedIncentiveIds(Array.from(next));
-                          }}
-                          style={{ marginTop: 2 }}
-                        />
-                        <div>
-                          <div style={{ fontWeight: 900 }}>
-                            {r.programName}
-                            {amt ? <span style={{ fontWeight: 700, color: "#374151" }}> — {amt}</span> : null}
-                          </div>
-                          <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>{r.shortBlurb}</div>
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
-              </>
-            ) : (
+                <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700 }}>
+                  <input
+                    type="checkbox"
+                    checked={includeIncentivesInNotes}
+                    onChange={(e) => setIncludeIncentivesInNotes(e.target.checked)}
+                  />
+                  Include incentives in snapshot notes on save
+                </label>
+              </div>
+
               <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 6 }}>
-                No incentive rules matched this system type yet. Add rules in{" "}
-                <code>src/lib/incentives/incentiveRules.ts</code>.
+                Based on: <b>{selectedCatalog.name}</b>
+                {incentiveSum ? <> • Est. numeric rebates: <b>${incentiveSum.min}–${incentiveSum.max}</b></> : null}
               </div>
-            )}
-          </div>
+
+              <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+                {incentives.map((r) => {
+                  const checked = selectedIncentiveIds.includes(r.id);
+                  const amt = formatAmount(r.amount);
+                  return (
+                    <label
+                      key={r.id}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "20px 1fr",
+                        gap: 10,
+                        alignItems: "start",
+                        padding: 10,
+                        borderRadius: 12,
+                        border: "1px solid #eef2f7",
+                        background: "#fafafa",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          const next = new Set(selectedIncentiveIds);
+                          if (e.target.checked) next.add(r.id);
+                          else next.delete(r.id);
+                          setSelectedIncentiveIds(Array.from(next));
+                        }}
+                        style={{ marginTop: 2 }}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 900 }}>
+                          {r.programName}
+                          {amt ? <span style={{ fontWeight: 700, color: "#374151" }}> — {amt}</span> : null}
+                        </div>
+                        <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>{r.shortBlurb}</div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          {/* ✅ Optional helper message when catalog selected but no incentives match */}
+          {selectedCatalog && !incentives.length ? (
+            <div style={{ color: "var(--muted)", fontSize: 12 }}>
+              No incentives matched this suggested upgrade. (Check your Incentives rules/tags.)
+            </div>
+          ) : null}
 
           <label style={{ display: "grid", gap: 6 }}>
             <div style={{ fontWeight: 700 }}>
