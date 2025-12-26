@@ -15,7 +15,7 @@ const ITEMS: Item[] = [
   { href: "/admin/jobs", label: "Jobs", icon: "🧾" },
   { href: "/admin/snapshots", label: "LEAF System Snapshots", icon: "🧩" },
   { href: "/admin/systems", label: "Systems Catalog", icon: "🧰" },
-
+  { href: "/admin/incentives", label: "Incentives", icon: "🏷️" },
 ];
 
 export default function SidebarNav() {
