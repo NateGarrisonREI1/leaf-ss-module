@@ -4,14 +4,16 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 
-import { MOCK_JOBS, type Job } from "../_data/mockJobs";
-import { findLocalJob } from "../_data/localJobs";
+import { MOCK_JOBS, type Job } from "../../_data/mockJobs";
+import { findLocalJob } from "../../_data/localJobs";
+
 import {
+  deleteLocalSnapshot,
   loadLocalSnapshots,
   snapshotsForJob,
-  deleteLocalSnapshot,
+  upsertLocalSnapshot,
   type SnapshotDraft,
-} from "../_data/localSnapshots";
+} from "../../_data/localSnapshots";
 
 /**
  * Job detail page
