@@ -5,21 +5,42 @@ import { useEffect, useMemo, useState } from "react";
 
 import { MOCK_JOBS, type Job } from "../_data/mockJobs";
 import { loadLocalJobs } from "../_data/localJobs";
-import { loadLocalSnapshots, type SnapshotDraft } from "../_data/localSnapshots";
+import {
+  deleteLocalSnapshot,
+  loadLocalSnapshots,
+  upsertLocalSnapshot,
+  type SnapshotDraft,
+} from "../_data/localSnapshots";
 
 function formatDate(iso: string) {
   const d = new Date(iso);
   return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
 }
 
+function nowIso() {
+  return new Date().toISOString();
+}
+
 export default function SnapshotsPage() {
   const [localJobs, setLocalJobs] = useState<Job[]>([]);
   const [snapshots, setSnapshots] = useState<SnapshotDraft[]>([]);
+
+  // edit state
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draftName, setDraftName] = useState<string>("");
+  const [draftCost, setDraftCost] = useState<string>("");
+  const [draftSavings, setDraftSavings] = useState<string>("");
+  const [draftPayback, setDraftPayback] = useState<string>("");
+  const [draftNotes, setDraftNotes] = useState<string>("");
 
   useEffect(() => {
     setLocalJobs(loadLocalJobs());
     setSnapshots(loadLocalSnapshots());
   }, []);
+
+  function refreshSnapshots() {
+    setSnapshots(loadLocalSnapshots());
+  }
 
   const jobsById = useMemo(() => {
     const merged = [...MOCK_JOBS, ...localJobs];
@@ -31,6 +52,66 @@ export default function SnapshotsPage() {
   const ordered = useMemo(() => {
     return [...snapshots].sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
   }, [snapshots]);
+
+  function toNumberOrNull(v: string): number | null {
+    const cleaned = v.trim();
+    if (!cleaned) return null;
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function startEdit(snap: SnapshotDraft) {
+    setEditingId(snap.id);
+    setDraftName(snap.suggested.name ?? "");
+    setDraftCost(snap.suggested.estCost?.toString() ?? "");
+    setDraftSavings(snap.suggested.estAnnualSavings?.toString() ?? "");
+    setDraftPayback(snap.suggested.estPaybackYears?.toString() ?? "");
+    setDraftNotes(snap.suggested.notes ?? "");
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setDraftName("");
+    setDraftCost("");
+    setDraftSavings("");
+    setDraftPayback("");
+    setDraftNotes("");
+  }
+
+  function saveEdit(snap: SnapshotDraft) {
+    const name = draftName.trim();
+    if (!name) {
+      alert("Suggested system name is required.");
+      return;
+    }
+
+    const next: SnapshotDraft = {
+      ...snap,
+      suggested: {
+        ...snap.suggested,
+        name,
+        estCost: toNumberOrNull(draftCost),
+        estAnnualSavings: toNumberOrNull(draftSavings),
+        estPaybackYears: toNumberOrNull(draftPayback),
+        notes: draftNotes.trim(),
+      },
+      updatedAt: nowIso(),
+    };
+
+    upsertLocalSnapshot(next);
+    refreshSnapshots();
+    cancelEdit();
+  }
+
+  function handleDelete(snapshotId: string) {
+    const ok = window.confirm("Delete this snapshot?");
+    if (!ok) return;
+
+    deleteLocalSnapshot(snapshotId);
+    refreshSnapshots();
+
+    if (editingId === snapshotId) cancelEdit();
+  }
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -57,7 +138,7 @@ export default function SnapshotsPage() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "1fr 1.2fr 1.4fr 0.9fr 0.9fr 0.8fr 0.9fr",
+                gridTemplateColumns: "1fr 1.1fr 1.3fr 0.8fr 0.8fr 0.7fr 0.9fr 1.2fr",
                 gap: 10,
                 padding: "12px 14px",
                 background: "rgba(16,24,40,.03)",
@@ -73,18 +154,20 @@ export default function SnapshotsPage() {
               <div>Savings/yr</div>
               <div>Payback</div>
               <div>Updated</div>
+              <div style={{ textAlign: "right" }}>Actions</div>
             </div>
 
             {ordered.map((snap) => {
               const job = jobsById.get(snap.jobId);
               const jobLabel = job ? `${job.customerName} — ${job.reportId}` : snap.jobId;
+              const isEditing = editingId === snap.id;
 
               return (
                 <div
                   key={snap.id}
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "1fr 1.2fr 1.4fr 0.9fr 0.9fr 0.8fr 0.9fr",
+                    gridTemplateColumns: "1fr 1.1fr 1.3fr 0.8fr 0.8fr 0.7fr 0.9fr 1.2fr",
                     gap: 10,
                     padding: "12px 14px",
                     borderTop: "1px solid var(--border)",
@@ -98,9 +181,7 @@ export default function SnapshotsPage() {
                     >
                       {jobLabel}
                     </Link>
-                    <div style={{ color: "var(--muted)", fontSize: 12 }}>
-                      {job?.address ?? "—"}
-                    </div>
+                    <div style={{ color: "var(--muted)", fontSize: 12 }}>{job?.address ?? "—"}</div>
                   </div>
 
                   <div>
@@ -109,17 +190,101 @@ export default function SnapshotsPage() {
                   </div>
 
                   <div>
-                    <div style={{ fontWeight: 900 }}>{snap.suggested.name}</div>
-                    <div style={{ color: "var(--muted)", fontSize: 12 }}>
-                      {snap.suggested.catalogSystemId ? "From catalog" : "Manual"}
-                      {snap.suggested.notes ? ` • ${snap.suggested.notes}` : ""}
-                    </div>
+                    {isEditing ? (
+                      <div style={{ display: "grid", gap: 6 }}>
+                        <input
+                          className="rei-input"
+                          value={draftName}
+                          onChange={(e) => setDraftName(e.target.value)}
+                          placeholder="Suggested system name"
+                        />
+                        <textarea
+                          className="rei-input"
+                          value={draftNotes}
+                          onChange={(e) => setDraftNotes(e.target.value)}
+                          placeholder="Notes"
+                          style={{ minHeight: 60, resize: "vertical" }}
+                        />
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ fontWeight: 900 }}>{snap.suggested.name}</div>
+                        <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                          {snap.suggested.catalogSystemId ? "From catalog" : "Manual"}
+                          {snap.suggested.notes ? ` • ${snap.suggested.notes}` : ""}
+                        </div>
+                      </>
+                    )}
                   </div>
 
-                  <div style={{ color: "var(--muted)" }}>{snap.suggested.estCost ?? "—"}</div>
-                  <div style={{ color: "var(--muted)" }}>{snap.suggested.estAnnualSavings ?? "—"}</div>
-                  <div style={{ color: "var(--muted)" }}>{snap.suggested.estPaybackYears ?? "—"}</div>
+                  <div style={{ color: "var(--muted)" }}>
+                    {isEditing ? (
+                      <input
+                        className="rei-input"
+                        value={draftCost}
+                        onChange={(e) => setDraftCost(e.target.value)}
+                        placeholder="Cost"
+                        inputMode="numeric"
+                      />
+                    ) : (
+                      snap.suggested.estCost ?? "—"
+                    )}
+                  </div>
+
+                  <div style={{ color: "var(--muted)" }}>
+                    {isEditing ? (
+                      <input
+                        className="rei-input"
+                        value={draftSavings}
+                        onChange={(e) => setDraftSavings(e.target.value)}
+                        placeholder="Savings/yr"
+                        inputMode="numeric"
+                      />
+                    ) : (
+                      snap.suggested.estAnnualSavings ?? "—"
+                    )}
+                  </div>
+
+                  <div style={{ color: "var(--muted)" }}>
+                    {isEditing ? (
+                      <input
+                        className="rei-input"
+                        value={draftPayback}
+                        onChange={(e) => setDraftPayback(e.target.value)}
+                        placeholder="Payback"
+                        inputMode="numeric"
+                      />
+                    ) : (
+                      snap.suggested.estPaybackYears ?? "—"
+                    )}
+                  </div>
+
                   <div style={{ color: "var(--muted)" }}>{formatDate(snap.updatedAt)}</div>
+
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, flexWrap: "wrap" }}>
+                    {isEditing ? (
+                      <>
+                        <button className="rei-btn rei-btnPrimary" type="button" onClick={() => saveEdit(snap)}>
+                          Save
+                        </button>
+                        <button className="rei-btn" type="button" onClick={cancelEdit}>
+                          Cancel
+                        </button>
+                        <button className="rei-btn" type="button" onClick={() => handleDelete(snap.id)}>
+                          Delete
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="rei-btn" type="button" onClick={() => startEdit(snap)}>
+                          Edit
+                        </button>
+                        <button className="rei-btn" type="button" onClick={() => handleDelete(snap.id)}>
+                          Delete
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -128,7 +293,7 @@ export default function SnapshotsPage() {
 
         <div style={{ height: 10 }} />
         <div style={{ fontSize: 12, color: "var(--muted)" }}>
-          Next: we’ll add “Edit Snapshot” + “Delete Snapshot” here, then build the mock report preview.
+          Next: add a dedicated snapshot detail page (<code>/admin/snapshots/[snapshotId]</code>) and a mock report preview.
         </div>
       </div>
     </div>
