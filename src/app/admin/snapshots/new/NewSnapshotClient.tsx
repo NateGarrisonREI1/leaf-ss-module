@@ -6,11 +6,157 @@ import { useRouter } from "next/navigation";
 
 import { MOCK_JOBS, type Job } from "../../_data/mockJobs";
 import { findLocalJob } from "../../_data/localJobs";
-
 import { upsertLocalSnapshot, type SnapshotDraft } from "../../_data/localSnapshots";
+
+// ✅ Your catalog file:
+import * as CatalogModule from "../../_data/mockSystems";
+
+type CatalogItem = {
+  id: string;
+  name: string;
+  replaces?: string;
+  benefits?: string;
+  defaultCost?: number | null;
+  defaultSavingsYr?: number | null;
+  defaultPaybackYears?: number | null;
+  defaultNotes?: string;
+};
+
+// Fallback (keeps UI usable even if catalog export is empty / schema changed)
+const FALLBACK_CATALOG: CatalogItem[] = [
+  {
+    id: "cat_hp_ducted_hi",
+    name: "Ducted Heat Pump (High Efficiency)",
+    replaces: "gas furnace + AC",
+    benefits: "Better comfort • Lower CO₂",
+    defaultCost: 14000,
+    defaultSavingsYr: 900,
+    defaultPaybackYears: 12,
+    defaultNotes: "Verify electrical capacity, duct condition, and sizing.",
+  },
+];
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function pickFirstArrayExport(mod: any): any[] {
+  if (!mod) return [];
+  // common export names (if you have one of these, it’ll pick it)
+  const candidates = [
+    mod.MOCK_SYSTEMS,
+    mod.MOCK_SYSTEM_CATALOG,
+    mod.SYSTEMS_CATALOG,
+    mod.CATALOG,
+    mod.SYSTEMS,
+    mod.default,
+  ];
+
+  for (const c of candidates) {
+    if (Array.isArray(c)) return c;
+  }
+
+  // if module exports multiple arrays, pick the first array-like export
+  for (const k of Object.keys(mod)) {
+    const v = mod[k];
+    if (Array.isArray(v)) return v;
+  }
+
+  return [];
+}
+
+function toNumberMaybe(v: any): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const cleaned = v.replace(/[^0-9.]/g, "");
+    if (!cleaned) return null;
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function normalizeCatalog(raw: any[]): CatalogItem[] {
+  if (!Array.isArray(raw)) return [];
+
+  return raw
+    .map((x: any, idx: number) => {
+      // Try a bunch of common keys so your catalog can evolve without breaking UI
+      const id =
+        String(
+          x.id ??
+            x.systemId ??
+            x.catalogId ??
+            x.key ??
+            x.slug ??
+            x.modelNumber ??
+            `cat_${idx}`
+        ) || `cat_${idx}`;
+
+      const name = String(x.name ?? x.title ?? x.displayName ?? x.label ?? x.systemName ?? "Catalog System");
+
+      const replaces =
+        x.replaces ??
+        x.replacesText ??
+        x.replaceText ??
+        x.replacesSystem ??
+        x.replacementFor ??
+        undefined;
+
+      const benefits =
+        x.benefits ??
+        x.benefitText ??
+        x.shortBlurb ??
+        x.summary ??
+        x.oneLiner ??
+        undefined;
+
+      // Costs / savings / payback (support multiple possible column names)
+      const defaultCost =
+        toNumberMaybe(x.defaultCost) ??
+        toNumberMaybe(x.estCost) ??
+        toNumberMaybe(x.cost) ??
+        toNumberMaybe(x.unitCost) ??
+        toNumberMaybe(x.installCost) ??
+        null;
+
+      const defaultSavingsYr =
+        toNumberMaybe(x.defaultSavingsYr) ??
+        toNumberMaybe(x.estSavingsYr) ??
+        toNumberMaybe(x.savingsYr) ??
+        toNumberMaybe(x.estAnnualSavings) ??
+        toNumberMaybe(x.annualSavings) ??
+        null;
+
+      const defaultPaybackYears =
+        toNumberMaybe(x.defaultPaybackYears) ??
+        toNumberMaybe(x.paybackYears) ??
+        toNumberMaybe(x.payback) ??
+        null;
+
+      const defaultNotes =
+        String(
+          x.defaultNotes ??
+            x.notes ??
+            x.longNotes ??
+            x.details ??
+            x.description ??
+            ""
+        ) || "";
+
+      return {
+        id,
+        name,
+        replaces,
+        benefits,
+        defaultCost,
+        defaultSavingsYr,
+        defaultPaybackYears,
+        defaultNotes: defaultNotes.trim() || undefined,
+      } as CatalogItem;
+    })
+    .filter((c: CatalogItem) => !!c?.id && !!c?.name);
 }
 
 export default function NewSnapshotClient({
@@ -33,6 +179,21 @@ export default function NewSnapshotClient({
     return sys ?? null;
   }, [job, systemId]);
 
+  // ✅ Pull catalog from src/app/admin/_data/mockSystems.ts
+  const catalog: CatalogItem[] = useMemo(() => {
+    const raw = pickFirstArrayExport(CatalogModule as any);
+    const normalized = normalizeCatalog(raw);
+    return normalized.length ? normalized : FALLBACK_CATALOG;
+  }, []);
+
+  const [catalogId, setCatalogId] = useState<string>("");
+
+  const selectedCatalog = useMemo(() => {
+    if (!catalogId) return null;
+    return catalog.find((c) => c.id === catalogId) ?? null;
+  }, [catalogId, catalog]);
+
+  // Form state
   const [suggestedName, setSuggestedName] = useState("");
   const [estCost, setEstCost] = useState<string>("");
   const [estAnnualSavings, setEstAnnualSavings] = useState<string>("");
@@ -46,6 +207,33 @@ export default function NewSnapshotClient({
     if (!cleaned) return null;
     const n = Number(cleaned);
     return Number.isFinite(n) ? n : null;
+  }
+
+  function setIfEmpty(current: string, next: string) {
+    return current.trim() ? current : next;
+  }
+
+  function applyCatalogDefaults() {
+    if (!selectedCatalog) return;
+
+    setSuggestedName((prev) => setIfEmpty(prev, selectedCatalog.name));
+
+    setEstCost((prev) => (prev.trim() ? prev : selectedCatalog.defaultCost ? String(selectedCatalog.defaultCost) : ""));
+    setEstAnnualSavings((prev) =>
+      prev.trim() ? prev : selectedCatalog.defaultSavingsYr ? String(selectedCatalog.defaultSavingsYr) : ""
+    );
+    setEstPaybackYears((prev) =>
+      prev.trim() ? prev : selectedCatalog.defaultPaybackYears ? String(selectedCatalog.defaultPaybackYears) : ""
+    );
+
+    setNotes((prev) => {
+      const base = prev.trim();
+      const catNotes = selectedCatalog.defaultNotes?.trim() ?? "";
+      if (!base) return catNotes;
+      if (!catNotes) return base;
+      if (base.includes(catNotes)) return base;
+      return `${base}\n\nCatalog notes: ${catNotes}`;
+    });
   }
 
   function onSave() {
@@ -74,7 +262,7 @@ export default function NewSnapshotClient({
 
       suggested: {
         name: suggestedName.trim(),
-        catalogSystemId: null, // future-ready
+        catalogSystemId: catalogId || null,
         estCost: parseNum(estCost),
         estAnnualSavings: parseNum(estAnnualSavings),
         estPaybackYears: parseNum(estPaybackYears),
@@ -83,7 +271,6 @@ export default function NewSnapshotClient({
     };
 
     upsertLocalSnapshot(draft);
-
     router.push(`/admin/jobs/${job.id}?snapSaved=1`);
   }
 
@@ -151,14 +338,7 @@ export default function NewSnapshotClient({
       <div className="rei-card">
         <div style={{ fontWeight: 900, marginBottom: 10 }}>Existing System (from worksheet)</div>
 
-        <div
-          style={{
-            border: "1px solid #e5e7eb",
-            borderRadius: 14,
-            padding: 12,
-            background: "white",
-          }}
-        >
+        <div style={{ border: "1px solid #e5e7eb", borderRadius: 14, padding: 12, background: "white" }}>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
             <div>
               <span style={{ fontWeight: 800 }}>Type:</span> {existingSystem.type}
@@ -190,7 +370,57 @@ export default function NewSnapshotClient({
       <div className="rei-card">
         <div style={{ fontWeight: 900, marginBottom: 10 }}>Suggested Upgrade (Proposed)</div>
 
-        <div style={{ display: "grid", gap: 10 }}>
+        <div style={{ display: "grid", gap: 12 }}>
+          {/* ✅ Catalog dropdown restored */}
+          <div style={{ display: "grid", gap: 8 }}>
+            <div style={{ fontWeight: 700 }}>Choose from Systems Catalog (optional)</div>
+
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <select
+                value={catalogId}
+                onChange={(e) => setCatalogId(e.target.value)}
+                style={{
+                  padding: 10,
+                  borderRadius: 10,
+                  border: "1px solid #e5e7eb",
+                  minWidth: 320,
+                  background: "white",
+                }}
+              >
+                <option value="">— Select a catalog system —</option>
+                {catalog.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                className="rei-btn"
+                onClick={applyCatalogDefaults}
+                disabled={!selectedCatalog}
+                style={{
+                  opacity: selectedCatalog ? 1 : 0.6,
+                  cursor: selectedCatalog ? "pointer" : "not-allowed",
+                }}
+              >
+                Apply catalog defaults
+              </button>
+            </div>
+
+            {selectedCatalog ? (
+              <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                {selectedCatalog.replaces ? <>From catalog • Replaces {selectedCatalog.replaces}</> : "From catalog"}
+                {selectedCatalog.benefits ? <> • {selectedCatalog.benefits}</> : null}
+              </div>
+            ) : (
+              <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                Catalog numbers are starting assumptions. You can override everything below.
+              </div>
+            )}
+          </div>
+
           <label style={{ display: "grid", gap: 6 }}>
             <div style={{ fontWeight: 700 }}>
               Suggested system name <span style={{ color: "#ef4444" }}>(required)</span>
@@ -212,7 +442,7 @@ export default function NewSnapshotClient({
               <input
                 value={estCost}
                 onChange={(e) => setEstCost(e.target.value)}
-                placeholder="e.g., 6000"
+                placeholder="e.g., 12000"
                 style={{ padding: 10, borderRadius: 10, border: "1px solid #e5e7eb" }}
               />
             </label>
