@@ -1,16 +1,19 @@
 "use client";
 
 import { useMemo, useState } from "react";
+
+// ✅ relative imports (no @ alias)
 import {
   INCENTIVE_LIBRARY,
   type IncentiveAmount,
   type IncentiveResource,
-} from "@/lib/incentives/incentiveRules";
+} from "../../../lib/incentives/incentiveRules";
+
 import {
   loadLocalIncentiveOverrides,
   saveLocalIncentiveOverrides,
   clearLocalIncentiveOverrides,
-} from "@/app/admin/_data/localIncentives";
+} from "../_data/localIncentives";
 
 const SYSTEM_TYPES = [
   { key: "hvac", label: "HVAC" },
