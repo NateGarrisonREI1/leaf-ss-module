@@ -4,27 +4,33 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 
-import { MOCK_JOBS, type Job } from "../../_data/mockJobs";
-import { findLocalJob } from "../../_data/localJobs";
-
+import { MOCK_JOBS, type Job } from "../_data/mockJobs";
+import { findLocalJob } from "../_data/localJobs";
 import {
-  deleteLocalSnapshot,
   loadLocalSnapshots,
   snapshotsForJob,
-  upsertLocalSnapshot,
+  deleteLocalSnapshot,
   type SnapshotDraft,
-} from "../../_data/localSnapshots";
+} from "../_data/localSnapshots";
 
-function formatDate(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
+/**
+ * Job detail page
+ * - Shows Existing Systems
+ * - Shows Saved Snapshots
+ * - "Generate Mock Report (N)" disabled if N===0
+ * - Adds "View Mock Report" under Saved Snapshots
+ */
+
+function cx(...parts: Array<string | false | null | undefined>) {
+  return parts.filter(Boolean).join(" ");
 }
 
-function nowIso() {
-  return new Date().toISOString();
+function pretty(s: any) {
+  if (s === null || s === undefined) return "—";
+  return String(s);
 }
 
-export default function JobDetailPage() {
+export default function JobPage() {
   const params = useParams();
   const jobId = (params?.jobId as string) || "";
 
@@ -33,173 +39,202 @@ export default function JobDetailPage() {
     return findLocalJob(jobId) ?? MOCK_JOBS.find((j) => j.id === jobId) ?? null;
   }, [jobId]);
 
-  // local re-render trigger after edits/deletes (lightweight)
-  const [bump, setBump] = useState(0);
-
-  // editing state for snapshots
-  const [editingSnapId, setEditingSnapId] = useState<string | null>(null);
-  const [draftName, setDraftName] = useState<string>("");
-  const [draftCost, setDraftCost] = useState<string>("");
-  const [draftSavings, setDraftSavings] = useState<string>("");
-  const [draftPayback, setDraftPayback] = useState<string>("");
-  const [draftNotes, setDraftNotes] = useState<string>("");
-
-  const snapshots: SnapshotDraft[] = useMemo(() => {
+  const [snapshots, setSnapshots] = useState<SnapshotDraft[]>(() => {
     loadLocalSnapshots();
     return jobId ? snapshotsForJob(jobId) : [];
-  }, [jobId, bump]);
+  });
 
-  function toNumberOrNull(v: string): number | null {
-    const cleaned = v.trim();
-    if (!cleaned) return null;
-    const n = Number(cleaned);
-    return Number.isFinite(n) ? n : null;
+  const snapshotCount = snapshots.length;
+
+  function refreshSnapshots() {
+    loadLocalSnapshots();
+    setSnapshots(jobId ? snapshotsForJob(jobId) : []);
   }
 
-  function startEditSnapshot(snap: SnapshotDraft) {
-    setEditingSnapId(snap.id);
-    setDraftName(snap.suggested.name ?? "");
-    setDraftCost(snap.suggested.estCost?.toString() ?? "");
-    setDraftSavings(snap.suggested.estAnnualSavings?.toString() ?? "");
-    setDraftPayback(snap.suggested.estPaybackYears?.toString() ?? "");
-    setDraftNotes(snap.suggested.notes ?? "");
-  }
-
-  function cancelEditSnapshot() {
-    setEditingSnapId(null);
-    setDraftName("");
-    setDraftCost("");
-    setDraftSavings("");
-    setDraftPayback("");
-    setDraftNotes("");
-  }
-
-  function saveSnapshot(snap: SnapshotDraft) {
-    const name = draftName.trim();
-    if (!name) {
-      alert("Suggested system name is required.");
-      return;
-    }
-
-    const next: SnapshotDraft = {
-      ...snap,
-      suggested: {
-        ...snap.suggested,
-        name,
-        estCost: toNumberOrNull(draftCost),
-        estAnnualSavings: toNumberOrNull(draftSavings),
-        estPaybackYears: toNumberOrNull(draftPayback),
-        notes: draftNotes.trim(),
-      },
-      updatedAt: nowIso(),
-    };
-
-    upsertLocalSnapshot(next);
-    setBump((n) => n + 1);
-    cancelEditSnapshot();
-  }
-
-  function deleteSnapshot(snapshotId: string) {
-    const ok = window.confirm("Delete this snapshot?");
+  function onDeleteSnapshot(id: string) {
+    const ok = confirm("Delete this snapshot? This cannot be undone (local only).");
     if (!ok) return;
-
-    deleteLocalSnapshot(snapshotId);
-    setBump((n) => n + 1);
-
-    if (editingSnapId === snapshotId) cancelEditSnapshot();
+    deleteLocalSnapshot(id);
+    refreshSnapshots();
   }
 
   if (!job) {
     return (
-      <div className="rei-card">
-        <div style={{ fontWeight: 900, fontSize: 16 }}>Job not found</div>
-        <div style={{ color: "var(--muted)", marginTop: 8 }}>
-          No job exists with id: <code>{jobId}</code>
-        </div>
-        <div style={{ marginTop: 12 }}>
-          <Link href="/admin/jobs">← Back to Jobs</Link>
-        </div>
+      <div style={{ padding: 24 }}>
+        <h1 style={{ margin: 0, fontSize: 18, fontWeight: 900 }}>Job not found</h1>
+        <p style={{ color: "#666" }}>No job exists with id: {jobId}</p>
+        <Link href="/admin/jobs" style={{ textDecoration: "underline" }}>
+          ← Back to Jobs
+        </Link>
       </div>
     );
   }
 
+  // ✅ tolerate different job schemas (your mock data may differ by key names)
+  const addressLine =
+    (job as any).address ??
+    (job as any).propertyAddress ??
+    (job as any).addressLine ??
+    (job as any).location ??
+    "";
+
+  const reportId = (job as any).reportId ?? (job as any).leafId ?? job.id;
+
+  const existingSystems: any[] =
+    (job as any).existingSystems ??
+    (job as any).systems ??
+    (job as any).existing ??
+    [];
+
   return (
-    <div style={{ display: "grid", gap: 14 }}>
-      {/* HEADER */}
-      <div className="rei-card">
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-          <div>
-            <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 6 }}>
-              {job.customerName} — {job.reportId}
+    <div style={{ padding: 20, maxWidth: 1100 }}>
+      {/* Header Card */}
+      <div
+        style={{
+          background: "#fff",
+          border: "1px solid #e5e7eb",
+          borderRadius: 16,
+          padding: 16,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 16,
+        }}
+      >
+        <div style={{ minWidth: 260 }}>
+          <div style={{ fontSize: 18, fontWeight: 900 }}>
+            {(job as any).customerName ? `${(job as any).customerName} — ${reportId}` : reportId}
+          </div>
+          <div style={{ color: "#6b7280", marginTop: 4 }}>{addressLine}</div>
+
+          <div style={{ display: "flex", gap: 14, marginTop: 10, color: "#111827" }}>
+            <div style={{ fontSize: 12 }}>
+              <span style={{ color: "#6b7280" }}>Sq Ft:</span>{" "}
+              <b>{pretty((job as any).sqft ?? (job as any).squareFeet)}</b>
             </div>
-            <div style={{ color: "var(--muted)" }}>{job.address ?? "—"}</div>
-
-            <div style={{ height: 10 }} />
-
-            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", color: "var(--muted)", fontSize: 12 }}>
-              <div>
-                <b style={{ color: "var(--text)" }}>Sq Ft:</b> {job.sqft ?? "—"}
-              </div>
-              <div>
-                <b style={{ color: "var(--text)" }}>Year Built:</b> {job.yearBuilt ?? "—"}
-              </div>
-              <div>
-                <b style={{ color: "var(--text)" }}>Systems:</b> {job.systems.length}
-              </div>
-              <div>
-                <b style={{ color: "var(--text)" }}>Snapshots:</b> {snapshots.length}
-              </div>
+            <div style={{ fontSize: 12 }}>
+              <span style={{ color: "#6b7280" }}>Year Built:</span>{" "}
+              <b>{pretty((job as any).yearBuilt)}</b>
+            </div>
+            <div style={{ fontSize: 12 }}>
+              <span style={{ color: "#6b7280" }}>Systems:</span>{" "}
+              <b>{existingSystems?.length ?? 0}</b>
+            </div>
+            <div style={{ fontSize: 12 }}>
+              <span style={{ color: "#6b7280" }}>Snapshots:</span>{" "}
+              <b>{snapshotCount}</b>
             </div>
           </div>
+        </div>
 
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <Link href="/admin/jobs" className="rei-btn" style={{ textDecoration: "none", color: "inherit" }}>
-              ← Jobs
-            </Link>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <Link
+            href="/admin/jobs"
+            style={{
+              color: "#111827",
+              textDecoration: "none",
+              fontWeight: 700,
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #e5e7eb",
+              background: "#fff",
+            }}
+          >
+            ← Jobs
+          </Link>
 
-            <Link
-              href={`/admin/jobs/${job.id}/report`}
-              className="rei-btn rei-btnPrimary"
-              style={{ textDecoration: "none", color: "inherit" }}
-            >
-              Generate Mock Report
-            </Link>
-          </div>
+          {/* ✅ Generate Mock Report (N) */}
+          <Link
+            href={snapshotCount > 0 ? `/admin/jobs/${job.id}/report` : "#"}
+            aria-disabled={snapshotCount === 0}
+            onClick={(e) => {
+              if (snapshotCount === 0) {
+                e.preventDefault();
+                alert("No snapshots yet. Create at least one snapshot to generate the mock report.");
+              }
+            }}
+            style={{
+              textDecoration: "none",
+              fontWeight: 800,
+              padding: "10px 14px",
+              borderRadius: 12,
+              border: "1px solid #2563eb",
+              background: snapshotCount === 0 ? "#93c5fd" : "#2563eb",
+              color: "#fff",
+              cursor: snapshotCount === 0 ? "not-allowed" : "pointer",
+              opacity: snapshotCount === 0 ? 0.75 : 1,
+              pointerEvents: "auto",
+            }}
+          >
+            Generate Mock Report ({snapshotCount})
+          </Link>
         </div>
       </div>
 
-      {/* INSPECTION UPLOAD PLACEHOLDER */}
-      <div className="rei-card">
-        <div style={{ fontWeight: 900, marginBottom: 6 }}>Inspection Upload</div>
-        <div style={{ color: "var(--muted)" }}>
+      {/* Inspection Upload (placeholder) */}
+      <div
+        style={{
+          marginTop: 18,
+          background: "#fff",
+          border: "1px solid #e5e7eb",
+          borderRadius: 16,
+          padding: 16,
+        }}
+      >
+        <div style={{ fontSize: 16, fontWeight: 900 }}>Inspection Upload</div>
+        <div style={{ color: "#6b7280", marginTop: 6 }}>
           Placeholder: upload inspection/HES PDFs here (Supabase Storage later).
         </div>
-        <div style={{ height: 10 }} />
-        <button className="rei-btn" type="button" disabled style={{ opacity: 0.6 }}>
+        <button
+          disabled
+          style={{
+            marginTop: 12,
+            padding: "10px 12px",
+            borderRadius: 12,
+            border: "1px solid #e5e7eb",
+            background: "#f3f4f6",
+            color: "#9ca3af",
+            fontWeight: 700,
+          }}
+        >
           Upload Inspection PDF (coming next)
         </button>
       </div>
 
-      {/* EXISTING SYSTEMS */}
-      <div className="rei-card">
-        <div style={{ fontWeight: 900, marginBottom: 6 }}>Existing Systems</div>
-        <div style={{ color: "var(--muted)" }}>
+      {/* Existing Systems */}
+      <div
+        style={{
+          marginTop: 18,
+          background: "#fff",
+          border: "1px solid #e5e7eb",
+          borderRadius: 16,
+          padding: 16,
+        }}
+      >
+        <div style={{ fontSize: 16, fontWeight: 900 }}>Existing Systems</div>
+        <div style={{ color: "#6b7280", marginTop: 6 }}>
           Create a snapshot from any existing system.
         </div>
 
-        <div style={{ height: 12 }} />
-
-        <div style={{ border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
+        <div
+          style={{
+            marginTop: 14,
+            border: "1px solid #e5e7eb",
+            borderRadius: 14,
+            overflow: "hidden",
+          }}
+        >
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "1fr 1.4fr 0.8fr 0.9fr 0.8fr 0.9fr 160px",
-              gap: 10,
-              padding: "12px 14px",
-              background: "rgba(16,24,40,.03)",
-              fontWeight: 900,
+              gridTemplateColumns: "1.2fr 1.6fr 1fr 1fr 1fr 1fr 180px",
+              gap: 0,
+              background: "#f9fafb",
+              borderBottom: "1px solid #e5e7eb",
+              padding: "10px 12px",
               fontSize: 12,
-              color: "var(--muted)",
+              color: "#6b7280",
+              fontWeight: 700,
             }}
           >
             <div>Type</div>
@@ -211,188 +246,181 @@ export default function JobDetailPage() {
             <div />
           </div>
 
-          {job.systems.length === 0 ? (
-            <div style={{ padding: 14, color: "var(--muted)" }}>No systems added yet.</div>
-          ) : (
-            job.systems.map((s) => (
+          {(existingSystems || []).map((sys: any, idx: number) => {
+            const type = sys.type ?? sys.category ?? "—";
+            const subtype = sys.subtype ?? sys.name ?? sys.detail ?? "—";
+            const ageYears = sys.ageYears ?? sys.age ?? "—";
+            const operational = sys.operational ?? sys.working ?? "—";
+            const wear = sys.wear ?? sys.wearScore ?? "—";
+            const maintenance = sys.maintenance ?? sys.maint ?? "—";
+
+            return (
               <div
-                key={s.id}
+                key={sys.id ?? idx}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1fr 1.4fr 0.8fr 0.9fr 0.8fr 0.9fr 160px",
-                  gap: 10,
-                  padding: "12px 14px",
-                  borderTop: "1px solid var(--border)",
+                  gridTemplateColumns: "1.2fr 1.6fr 1fr 1fr 1fr 1fr 180px",
+                  padding: "14px 12px",
+                  borderBottom: idx === existingSystems.length - 1 ? "none" : "1px solid #e5e7eb",
                   alignItems: "center",
                 }}
               >
-                <div style={{ fontWeight: 900 }}>{s.type}</div>
-                <div style={{ color: "var(--muted)" }}>{s.subtype}</div>
-                <div style={{ color: "var(--muted)" }}>{s.ageYears} yrs</div>
-                <div style={{ color: "var(--muted)" }}>{s.operational}</div>
-                <div style={{ color: "var(--muted)" }}>{s.wear}/5</div>
-                <div style={{ color: "var(--muted)" }}>{s.maintenance}</div>
+                <div style={{ fontWeight: 900 }}>{type}</div>
+                <div style={{ color: "#374151" }}>{subtype}</div>
+                <div style={{ color: "#374151" }}>{pretty(ageYears)} yrs</div>
+                <div style={{ color: "#374151" }}>{pretty(operational)}</div>
+                <div style={{ color: "#374151" }}>{pretty(wear)}</div>
+                <div style={{ color: "#374151" }}>{pretty(maintenance)}</div>
 
-                <Link
-                  className="rei-btn rei-btnPrimary"
-                  href={`/admin/snapshots/new?jobId=${job.id}&systemId=${s.id}`}
-                  style={{ textDecoration: "none", textAlign: "center" }}
-                >
-                  Create Snapshot
-                </Link>
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <Link
+                    href={`/admin/jobs/${job.id}/snapshots/new?systemIndex=${idx}`}
+                    style={{
+                      textDecoration: "none",
+                      background: "#2563eb",
+                      color: "#fff",
+                      fontWeight: 900,
+                      padding: "10px 12px",
+                      borderRadius: 12,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 150,
+                      textAlign: "center",
+                    }}
+                  >
+                    Create Snapshot
+                  </Link>
+                </div>
               </div>
-            ))
-          )}
+            );
+          })}
         </div>
       </div>
 
-      {/* SAVED SNAPSHOTS */}
-      <div className="rei-card">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+      {/* Saved Snapshots */}
+      <div
+        style={{
+          marginTop: 18,
+          background: "#fff",
+          border: "1px solid #e5e7eb",
+          borderRadius: 16,
+          padding: 16,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
           <div>
-            <div style={{ fontWeight: 900, marginBottom: 6 }}>Saved Snapshots</div>
-            <div style={{ color: "var(--muted)" }}>
-              Edit and delete snapshots here (localStorage for now).
+            <div style={{ fontSize: 16, fontWeight: 900 }}>Saved Snapshots</div>
+            <div style={{ color: "#6b7280", marginTop: 6 }}>
+              Stored locally for now (Supabase later). These should persist across deployments once backed by DB/storage.
             </div>
           </div>
 
-          <Link href="/admin/snapshots" className="rei-btn" style={{ textDecoration: "none", color: "inherit" }}>
-            View all snapshots
-          </Link>
-        </div>
-
-        <div style={{ height: 12 }} />
-
-        {snapshots.length === 0 ? (
-          <div style={{ color: "var(--muted)" }}>
-            No snapshots saved for this job yet.
-            <div style={{ marginTop: 8, fontSize: 12 }}>
-              If you switched deployments, import your JSON export to restore local snapshots on this domain.
-            </div>
-          </div>
-        ) : (
-          <div style={{ border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
-            <div
+          <div style={{ display: "flex", gap: 10 }}>
+            <button
+              onClick={refreshSnapshots}
               style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1.5fr 0.9fr 0.9fr 0.8fr 1.4fr",
-                gap: 10,
-                padding: "12px 14px",
-                background: "rgba(16,24,40,.03)",
-                fontWeight: 900,
-                fontSize: 12,
-                color: "var(--muted)",
+                borderRadius: 12,
+                border: "1px solid #e5e7eb",
+                background: "#fff",
+                padding: "10px 12px",
+                fontWeight: 800,
+                cursor: "pointer",
               }}
             >
-              <div>Existing</div>
-              <div>Suggested</div>
-              <div>Cost</div>
-              <div>Savings/yr</div>
-              <div>Updated</div>
-              <div style={{ textAlign: "right" }}>Actions</div>
-            </div>
+              Refresh
+            </button>
 
-            {snapshots.map((snap) => {
-              const isEditing = editingSnapId === snap.id;
+            {/* ✅ View Mock Report */}
+            <Link
+              href={snapshotCount > 0 ? `/admin/jobs/${job.id}/report` : "#"}
+              aria-disabled={snapshotCount === 0}
+              onClick={(e) => {
+                if (snapshotCount === 0) {
+                  e.preventDefault();
+                  alert("No snapshots yet.");
+                }
+              }}
+              style={{
+                textDecoration: "none",
+                borderRadius: 12,
+                border: "1px solid #2563eb",
+                background: snapshotCount === 0 ? "#93c5fd" : "#2563eb",
+                color: "#fff",
+                padding: "10px 12px",
+                fontWeight: 900,
+                cursor: snapshotCount === 0 ? "not-allowed" : "pointer",
+                opacity: snapshotCount === 0 ? 0.75 : 1,
+              }}
+            >
+              View Mock Report
+            </Link>
+          </div>
+        </div>
+
+        {snapshots.length === 0 ? (
+          <div style={{ marginTop: 14, color: "#6b7280" }}>
+            No snapshots saved yet. Click <b>Create Snapshot</b> on an existing system.
+          </div>
+        ) : (
+          <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+            {snapshots.map((s) => {
+              const title = `${s.existing.type ?? "System"} • ${s.existing.subtype ?? "—"}`;
+              const suggested = s.suggested?.name ?? "Suggested Upgrade";
 
               return (
                 <div
-                  key={snap.id}
+                  key={s.id}
                   style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1.5fr 0.9fr 0.9fr 0.8fr 1.4fr",
-                    gap: 10,
-                    padding: "12px 14px",
-                    borderTop: "1px solid var(--border)",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 14,
+                    padding: 12,
+                    display: "flex",
                     alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
                   }}
                 >
-                  <div>
-                    <div style={{ fontWeight: 900 }}>{snap.existing.type}</div>
-                    <div style={{ color: "var(--muted)", fontSize: 12 }}>{snap.existing.subtype}</div>
+                  <div style={{ minWidth: 260 }}>
+                    <div style={{ fontWeight: 900 }}>{title}</div>
+                    <div style={{ color: "#6b7280", marginTop: 2, fontSize: 12 }}>
+                      Suggested: <b style={{ color: "#111827" }}>{suggested}</b>
+                    </div>
+                    <div style={{ color: "#6b7280", marginTop: 2, fontSize: 12 }}>
+                      Saved: {new Date(s.createdAt).toLocaleString()}
+                    </div>
                   </div>
 
-                  <div>
-                    {isEditing ? (
-                      <div style={{ display: "grid", gap: 6 }}>
-                        <input
-                          className="rei-input"
-                          value={draftName}
-                          onChange={(e) => setDraftName(e.target.value)}
-                          placeholder="Suggested system name"
-                        />
-                        <textarea
-                          className="rei-input"
-                          value={draftNotes}
-                          onChange={(e) => setDraftNotes(e.target.value)}
-                          placeholder="Notes"
-                          style={{ minHeight: 60, resize: "vertical" }}
-                        />
-                      </div>
-                    ) : (
-                      <>
-                        <div style={{ fontWeight: 900 }}>{snap.suggested.name}</div>
-                        <div style={{ color: "var(--muted)", fontSize: 12 }}>
-                          {snap.suggested.catalogSystemId ? "From catalog" : "Manual"}
-                          {snap.suggested.notes ? ` • ${snap.suggested.notes}` : ""}
-                        </div>
-                      </>
-                    )}
-                  </div>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    <Link
+                      href={`/admin/jobs/${job.id}/snapshots/${s.id}`}
+                      style={{
+                        textDecoration: "none",
+                        borderRadius: 12,
+                        border: "1px solid #e5e7eb",
+                        background: "#fff",
+                        padding: "10px 12px",
+                        fontWeight: 800,
+                        color: "#111827",
+                      }}
+                    >
+                      Edit
+                    </Link>
 
-                  <div style={{ color: "var(--muted)" }}>
-                    {isEditing ? (
-                      <input
-                        className="rei-input"
-                        value={draftCost}
-                        onChange={(e) => setDraftCost(e.target.value)}
-                        placeholder="Cost"
-                        inputMode="numeric"
-                      />
-                    ) : (
-                      snap.suggested.estCost ?? "—"
-                    )}
-                  </div>
-
-                  <div style={{ color: "var(--muted)" }}>
-                    {isEditing ? (
-                      <input
-                        className="rei-input"
-                        value={draftSavings}
-                        onChange={(e) => setDraftSavings(e.target.value)}
-                        placeholder="Savings/yr"
-                        inputMode="numeric"
-                      />
-                    ) : (
-                      snap.suggested.estAnnualSavings ?? "—"
-                    )}
-                  </div>
-
-                  <div style={{ color: "var(--muted)" }}>{formatDate(snap.updatedAt)}</div>
-
-                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, flexWrap: "wrap" }}>
-                    {isEditing ? (
-                      <>
-                        <button className="rei-btn rei-btnPrimary" type="button" onClick={() => saveSnapshot(snap)}>
-                          Save
-                        </button>
-                        <button className="rei-btn" type="button" onClick={cancelEditSnapshot}>
-                          Cancel
-                        </button>
-                        <button className="rei-btn" type="button" onClick={() => deleteSnapshot(snap.id)}>
-                          Delete
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button className="rei-btn" type="button" onClick={() => startEditSnapshot(snap)}>
-                          Edit
-                        </button>
-                        <button className="rei-btn" type="button" onClick={() => deleteSnapshot(snap.id)}>
-                          Delete
-                        </button>
-                      </>
-                    )}
+                    <button
+                      onClick={() => onDeleteSnapshot(s.id)}
+                      style={{
+                        borderRadius: 12,
+                        border: "1px solid #fecaca",
+                        background: "#fff",
+                        padding: "10px 12px",
+                        fontWeight: 900,
+                        color: "#b91c1c",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Delete
+                    </button>
                   </div>
                 </div>
               );
