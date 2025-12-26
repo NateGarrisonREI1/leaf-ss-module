@@ -35,3 +35,11 @@ export function saveLeafSSMasterConfig(config: any) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
 }
+export function resetLeafSSMasterConfig() {
+  if (typeof window === "undefined") return;
+
+  localStorage.removeItem("LEAF_SS_MASTER_CONFIG");
+
+  // Reload defaults immediately so UI updates
+  return loadLeafSSMasterConfig();
+}
