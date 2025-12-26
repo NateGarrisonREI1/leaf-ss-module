@@ -9,6 +9,15 @@ import { loadLocalSnapshots, snapshotsForJob } from "../../../_data/localSnapsho
 import { MOCK_SYSTEMS } from "../../../_data/mockSystems";
 import { getIncentivesForSystemType, type IncentiveResource } from "../../../../../lib/incentives/incentiveRules";
 
+import { LEAF_SS_CONFIG } from "../../../_data/leafSSConfig";
+import {
+  getSnapshotByIndex,
+  getTier,
+  classifyCostFromThresholds,
+  dynamicSavingsRangeFromRule,
+  type LeafTierKey,
+} from "../../../_data/leafSSConfigRuntime";
+
 function normalizeTag(t: string): string {
   return String(t || "")
     .trim()
@@ -57,6 +66,7 @@ export default function JobReportPage() {
     }
   }, [jobId]);
 
+  // we still use local snapshots for “existingType/subtype/tags/incentives”
   const pages = useMemo(() => {
     const list = Array.isArray(snaps) ? snaps : [];
     return list.slice(0, 3).map((s, idx) => {
@@ -65,9 +75,7 @@ export default function JobReportPage() {
 
       const catalogId = s?.suggested?.catalogSystemId || null;
       const catalog = catalogId ? (MOCK_SYSTEMS as any[]).find((x) => x.id === catalogId) : null;
-      const tags: string[] = (catalog?.tags || [])
-        .map((t: any) => normalizeTag(String(t || "")))
-        .filter(Boolean);
+      const tags: string[] = (catalog?.tags || []).map((t: any) => normalizeTag(String(t || ""))).filter(Boolean);
 
       const incentives = getIncentivesForSystemType(existingType, { tags }).filter((r: any) => !(r as any).disabled);
 
@@ -95,7 +103,8 @@ export default function JobReportPage() {
 
     function setActiveDot(i: number) {
       dots.forEach((d, idx) => d.classList.toggle("active", idx === i));
-      if (pageLabel) pageLabel.textContent = `Snapshot ${i + 1} of ${dots.length || 0}`;
+      const tpl = LEAF_SS_CONFIG.global.uiText.headerPageLabelTemplate || "Snapshot {current} of {total}";
+      if (pageLabel) pageLabel.textContent = tpl.replace("{current}", String(i + 1)).replace("{total}", String(dots.length || 0));
     }
 
     function scrollToPage(i: number) {
@@ -127,35 +136,15 @@ export default function JobReportPage() {
     pagesEl?.addEventListener("scroll", onScroll);
     window.addEventListener("resize", onResize);
 
-    // ---- Slider logic (still hardcoded for now; next step is to read from LEAF_SS_CONFIG) ----
-    const LEAF_PRICE_MIN = 5000;
-    const LEAF_PRICE_MAX = 7000;
-    const BASE_SAVINGS_MIN = 19;
-    const BASE_SAVINGS_MAX = 35;
+    // ---- shared helpers ----
+    const global = LEAF_SS_CONFIG.global;
+    const globalSlider = global.slider;
+    const globalIncentives = global.incentives;
+    const msgLib = LEAF_SS_CONFIG.messageLibrary;
 
-    const INCENTIVES_LOW = 750;
-    const INCENTIVES_HIGH = 3000;
-
-    const COST_UNREALISTIC_BELOW = LEAF_PRICE_MIN - 500;
-    const COST_OVERPRICED_ABOVE = LEAF_PRICE_MAX + 3000;
-
-    const formatMoney = (n: number) => "$" + Math.round(n).toLocaleString("en-US");
     const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
-
-    function dynamicSavingsRange(price: number) {
-      const over = Math.max(0, price - LEAF_PRICE_MAX);
-      const steps = Math.floor(over / 1000);
-      const bump = steps * 2;
-      return { min: BASE_SAVINGS_MIN + bump, max: BASE_SAVINGS_MAX + bump };
-    }
-
-    function classifyCost(price: number) {
-      if (price < COST_UNREALISTIC_BELOW) return "unreal_low";
-      if (price < LEAF_PRICE_MIN) return "low";
-      if (price > COST_OVERPRICED_ABOVE) return "over";
-      if (price > LEAF_PRICE_MAX) return "likely_over";
-      return "in";
-    }
+    const formatMoney = (n: number) => "$" + Math.round(n).toLocaleString(global.format.currencyLocale || "en-US");
+    const formatMoneyRange = (a: number, b: number) => `${formatMoney(a)}–${formatMoney(b)}`;
 
     function setBadge(el: HTMLElement, tone: "good" | "warn" | "bad" | "neutral", text: string) {
       el.setAttribute("data-tone", tone);
@@ -163,7 +152,7 @@ export default function JobReportPage() {
     }
 
     function setBand(okEl: HTMLElement, sliderMin: number, sliderMax: number, okMin: number, okMax: number) {
-      const span = sliderMax - sliderMin;
+      const span = sliderMax - sliderMin || 1;
       const L = ((okMin - sliderMin) / span) * 100;
       const R = ((okMax - sliderMin) / span) * 100;
       okEl.style.left = `${clamp(L, 0, 100)}%`;
@@ -171,19 +160,9 @@ export default function JobReportPage() {
     }
 
     function setFill(fillEl: HTMLElement, sliderMin: number, sliderMax: number, value: number) {
-      const span = sliderMax - sliderMin;
+      const span = sliderMax - sliderMin || 1;
       const pct = ((value - sliderMin) / span) * 100;
       fillEl.style.width = `${clamp(pct, 0, 100)}%`;
-    }
-
-    function computeNetCostRange(installCost: number) {
-      const netLow = Math.max(0, installCost - INCENTIVES_HIGH);
-      const netHigh = Math.max(0, installCost - INCENTIVES_LOW);
-      return { netLow, netHigh };
-    }
-
-    function formatMoneyRange(a: number, b: number) {
-      return `${formatMoney(a)}–${formatMoney(b)}`;
     }
 
     function renderList(el: HTMLElement | null, items: string[]) {
@@ -191,167 +170,210 @@ export default function JobReportPage() {
       el.innerHTML = (items || []).map((t) => `<li>${t}</li>`).join("");
     }
 
-    function quickReadMessage(costClass: string) {
-      const premiumWhy = [
-        "More expensive systems can provide slightly higher savings (better efficiency/controls/commissioning) — usually incremental.",
-        "ROI can drop when cost climbs faster than savings. A premium quote should come with clear, measurable value.",
-      ];
+    function computeNetCostRange(installCost: number) {
+      const low = Number(globalIncentives.low || 0);
+      const high = Number(globalIncentives.high || 0);
+      const netLow = Math.max(0, installCost - high);
+      const netHigh = Math.max(0, installCost - low);
+      return { netLow, netHigh };
+    }
 
-      if (costClass === "unreal_low") {
-        return {
-          tone: "warn",
-          headline: "This price is extremely low — verify scope before scheduling.",
-          why: ["Very low pricing often means partial scope or missing line items.", "Confirming scope protects you from surprise add-ons later."],
-          qVisible: [
-            "Is this a full replacement quote (equipment, labor, permits, startup/commissioning)?",
-            "What’s excluded that could be added later (venting, thermostat, disposal, permits)?",
-          ],
-          qMore: ["Can you itemize model numbers + warranty terms in writing?", "Is there any scenario where price changes after work begins?"],
-        };
+    function initLeafPage(root: Element) {
+      const $ = (sel: string) => root.querySelector(sel) as HTMLElement | null;
+
+      // ✅ strongly typed slider + guard (fixes the TS error permanently)
+      const priceSlider = root.querySelector<HTMLInputElement>('[data-el="priceSlider"]');
+      if (!priceSlider) return () => {};
+
+      const pageIndex = Number(root.getAttribute("data-page-index") || "0");
+      const snapshot = getSnapshotByIndex(pageIndex);
+
+      // tier state
+      let tierKey: LeafTierKey = "better";
+
+      const priceValue = $('[data-el="priceValue"]');
+      const costBadge = $('[data-el="costBadge"]');
+      const overallBadge = $('[data-el="overallBadge"]');
+      const overallHeadline = $('[data-el="overallHeadline"]');
+
+      const quickReadWhy = $('[data-el="quickReadWhy"]');
+      const qVisible = $('[data-el="quickReadQuestionsVisible"]');
+      const qMore = $('[data-el="quickReadQuestionsMore"]');
+
+      const msNetCostRange = $('[data-el="msNetCostRange"]');
+      const msSavingsRange = $('[data-el="msSavingsRange"]');
+      const heroSavingsPill = $('[data-el="heroSavingsPill"]');
+
+      const recommendedNameEl = $('[data-el="recommendedName"]');
+      const recommendedStatusPill = $('[data-el="recommendedStatusPill"]');
+
+      const priceBandOK = $('[data-el="priceBandOK"]');
+      const priceBandFill = $('[data-el="priceBandFill"]');
+
+      const dynSavings = $('[data-el="dynamicSavingsRange"]');
+      const leafRangeText = $('[data-el="leafRangeText"]');
+      const resetBtn = $('[data-el="resetBtn"]');
+
+      const tierButtons = Array.from(root.querySelectorAll<HTMLButtonElement>('[data-el="tierBtn"]'));
+
+      // set slider from config globally
+      priceSlider.min = String(globalSlider.min);
+      priceSlider.max = String(globalSlider.max);
+      priceSlider.step = String(globalSlider.step);
+
+      function getRuleOverrides() {
+        const snapOverrides = snapshot?.rulesOverrides || {};
+        const thresholds = snapOverrides.costClassThresholds || global.rangesAndClassifications.costClassThresholds;
+        const dynRule = snapOverrides.dynamicSavingsRule || global.rangesAndClassifications.dynamicSavingsRule;
+        return { thresholds, dynRule };
       }
 
-      if (costClass === "low") {
-        return {
-          tone: "good",
-          headline: "Competitive quote — great sign if scope is complete.",
-          why: ["Competitive bids happen and can be a win for the homeowner.", "A quick scope check ensures it’s apples-to-apples."],
-          qVisible: ["Can you walk me through exactly what’s included in this price?", "Are permits/inspections and commissioning included?"],
-          qMore: ["Is the thermostat included? What about haul-away/disposal?", "Can you confirm final scope and model numbers in writing?"],
-        };
+      function setTier(next: LeafTierKey) {
+        tierKey = next;
+
+        tierButtons.forEach((b) => b.classList.toggle("active", b.dataset.tier === tierKey));
+
+        // move slider to tier midpoint (config says to do this)
+        const t = getTier(snapshot, tierKey);
+        const min = Number(t?.leafPriceRange?.min || globalSlider.min);
+        const max = Number(t?.leafPriceRange?.max || globalSlider.max);
+        const mid = Math.round((min + max) / 2);
+
+        priceSlider.value = String(mid);
+        updateUI();
       }
 
-      if (costClass === "in") {
-        return {
-          tone: "good",
-          headline: "This looks like a fair, in-range quote.",
-          why: ["Pricing aligns with what LEAF typically sees for this replacement category.", "In-range quotes usually indicate predictable scope and fewer surprises."],
-          qVisible: ["What’s the install timeline and what prep do you need from me?", "What warranty coverage comes with the equipment and labor?"],
-          qMore: ["Do you handle permits and inspection sign-off?", "What maintenance keeps performance strong long-term?"],
-        };
+      function updateUI() {
+        const price = Number(priceSlider.value);
+
+        const t = getTier(snapshot, tierKey);
+        const tierMin = Number(t?.leafPriceRange?.min || 0);
+        const tierMax = Number(t?.leafPriceRange?.max || 0);
+
+        const baseMin = Number(t?.baseMonthlySavings?.min || 0);
+        const baseMax = Number(t?.baseMonthlySavings?.max || 0);
+
+        const { thresholds, dynRule } = getRuleOverrides();
+
+        // recommended copy changes per tier (from config)
+        const recName = snapshot?.recommendedSystemCard?.recommendedNameByTier?.[tierKey];
+        const recStatus = snapshot?.recommendedSystemCard?.statusPillTextByTier?.[tierKey];
+        if (recommendedNameEl && recName) recommendedNameEl.textContent = String(recName);
+        if (recommendedStatusPill && recStatus) recommendedStatusPill.textContent = String(recStatus);
+
+        if (priceValue) priceValue.textContent = formatMoney(price);
+
+        // savings range at price (config-driven)
+        const dyn = dynamicSavingsRangeFromRule({
+          baseMin,
+          baseMax,
+          price,
+          tierMax,
+          stepSizeDollars: Number(dynRule?.stepSizeDollars ?? 1000),
+          bumpPerStepMonthlyDollars: Number(dynRule?.bumpPerStepMonthlyDollars ?? 2),
+        });
+
+        const savText = `${formatMoney(dyn.min)}–${formatMoney(dyn.max)}/mo`;
+        if (dynSavings) dynSavings.textContent = savText;
+        if (msSavingsRange) msSavingsRange.textContent = savText;
+        if (heroSavingsPill) heroSavingsPill.textContent = `Save ~${formatMoney(dyn.min)}–${formatMoney(dyn.max)}/mo`;
+
+        // leaf range text updates per tier
+        if (leafRangeText) leafRangeText.textContent = formatMoneyRange(tierMin, tierMax);
+
+        // band positions based on current tier
+        if (priceBandOK) setBand(priceBandOK, Number(priceSlider.min), Number(priceSlider.max), tierMin, tierMax);
+        if (priceBandFill) setFill(priceBandFill, Number(priceSlider.min), Number(priceSlider.max), price);
+
+        // cost class
+        const costClass = classifyCostFromThresholds({
+          price,
+          tierMin,
+          tierMax,
+          unrealLowOffsetFromMin: Number(thresholds?.unrealLowOffsetFromMin ?? -500),
+          overpricedOffsetFromMax: Number(thresholds?.overpricedOffsetFromMax ?? 3000),
+        });
+
+        // badges from config library
+        const costBadgeText = msgLib.costBadgeTextByClass?.[costClass] || "—";
+        if (costBadge) {
+          const tone =
+            costClass === "in" ? "good" : costClass === "low" || costClass === "likely_over" ? "warn" : costClass === "unreal_low" ? "bad" : "bad";
+          setBadge(costBadge, tone, costBadgeText);
+        }
+
+        const overallText = msgLib.overallBadgeTextByClass?.[costClass] || "—";
+        if (overallBadge) {
+          const tone = costClass === "in" ? "good" : costClass === "over" ? "bad" : "warn";
+          setBadge(overallBadge, tone, overallText);
+        }
+
+        // quick read content
+        const quick = msgLib.quickReadByCostClass?.[costClass];
+        if (overallHeadline && quick?.headline) overallHeadline.textContent = quick.headline;
+        renderList(quickReadWhy, quick?.why || []);
+        renderList(qVisible, quick?.qVisible || []);
+        renderList(qMore, quick?.qMore || []);
+
+        // decision content
+        const decision = msgLib.decisionByCostClass?.[costClass];
+        const decisionBadgeEl = $('[data-el="decisionBadge"]');
+        const decisionHeadlineEl = $('[data-el="decisionHeadline"]');
+        const decisionTextEl = $('[data-el="decisionText"]');
+        const msValueCheckEl = $('[data-el="msValueCheck"]');
+        const msMeaningEl = $('[data-el="msMeaning"]');
+
+        if (decisionBadgeEl && decision?.decisionBadge) decisionBadgeEl.textContent = decision.decisionBadge;
+        if (decisionHeadlineEl && decision?.summaryHeadline) decisionHeadlineEl.textContent = decision.summaryHeadline;
+        if (decisionTextEl && decision?.summaryText) decisionTextEl.textContent = decision.summaryText;
+        if (msValueCheckEl && decision?.msValueCheck) msValueCheckEl.textContent = decision.msValueCheck;
+        if (msMeaningEl && decision?.msMeaning) msMeaningEl.textContent = decision.msMeaning;
+
+        // net cost range (after incentives)
+        const net = computeNetCostRange(price);
+        const netMin = Math.min(net.netLow, net.netHigh);
+        const netMax = Math.max(net.netLow, net.netHigh);
+        if (msNetCostRange) msNetCostRange.textContent = formatMoneyRange(netMin, netMax);
       }
 
-      if (costClass === "likely_over") {
-        return {
-          tone: "warn",
-          headline: "Higher than LEAF range — confirm what’s driving the price.",
-          why: [
-            "Higher quotes can be justified by site conditions (access, venting, ductwork, electrical).",
-            "It can also reflect premium add-ons you may not need.",
-            ...premiumWhy,
-          ],
-          qVisible: ["What specifically is driving the price above typical range?", "Is there a simpler option that still meets the goals?"],
-          qMore: ["Can you provide an itemized quote so I can compare bids accurately?", "Which add-ons are optional vs required?"],
-        };
+      function resetToTierMid() {
+        const t = getTier(snapshot, tierKey);
+        const min = Number(t?.leafPriceRange?.min || globalSlider.min);
+        const max = Number(t?.leafPriceRange?.max || globalSlider.max);
+        const mid = Math.round((min + max) / 2);
+        priceSlider.value = String(mid);
+        updateUI();
       }
 
-      return {
-        tone: "warn",
-        headline: "Major caution — this looks overpriced for the category.",
-        why: ["This is significantly above typical replacement pricing.", "Before committing, compare at least one itemized bid.", ...premiumWhy],
-        qVisible: ["Can you itemize the quote (equipment, labor, permits, extras) line-by-line?", "What would the ‘standard replacement’ option cost and what changes?"],
-        qMore: [
-          "Are there scope items here that belong in a separate project (duct redesign, electrical upgrades)?",
-          "Can you confirm model numbers and efficiency details to justify pricing?",
-        ],
+      // tier buttons wiring
+      const onTierClick = (e: Event) => {
+        const btn = (e.target as HTMLElement | null)?.closest?.('[data-el="tierBtn"]') as HTMLButtonElement | null;
+        if (!btn) return;
+        const t = (btn.dataset.tier || "better") as LeafTierKey;
+        setTier(t);
+      };
+
+      // events
+      const onInput = () => updateUI();
+      const onReset = () => resetToTierMid();
+
+      priceSlider.addEventListener("input", onInput);
+      resetBtn?.addEventListener("click", onReset);
+      root.addEventListener("click", onTierClick);
+
+      // default tier from config if provided (else better)
+      const defaultTier: LeafTierKey = "better";
+      setTier(defaultTier);
+
+      return () => {
+        priceSlider.removeEventListener("input", onInput);
+        resetBtn?.removeEventListener("click", onReset);
+        root.removeEventListener("click", onTierClick);
       };
     }
 
-    function initLeafPage(root: HTMLElement) {
-  const $ = (sel: string) => root.querySelector(sel) as HTMLElement | null;
-
-  // ✅ Hard guarantee: priceSlider is a real <input>, otherwise skip this page
-  const priceSliderEl = root.querySelector('[data-el="priceSlider"]');
-  if (!(priceSliderEl instanceof HTMLInputElement)) return () => {};
-  const priceSlider = priceSliderEl;
-
-  const priceValue = $('[data-el="priceValue"]');
-  const costBadge = $('[data-el="costBadge"]');
-  const overallBadge = $('[data-el="overallBadge"]');
-  const overallHeadline = $('[data-el="overallHeadline"]');
-
-  const quickReadWhy = $('[data-el="quickReadWhy"]');
-  const qVisible = $('[data-el="quickReadQuestionsVisible"]');
-  const qMore = $('[data-el="quickReadQuestionsMore"]');
-
-  const msNetCostRange = $('[data-el="msNetCostRange"]');
-  const msSavingsRange = $('[data-el="msSavingsRange"]');
-  const heroSavingsPill = $('[data-el="heroSavingsPill"]');
-
-  const priceBandOK = $('[data-el="priceBandOK"]');
-  const priceBandFill = $('[data-el="priceBandFill"]');
-
-  const dynSavings = $('[data-el="dynamicSavingsRange"]');
-  const resetBtn = $('[data-el="resetBtn"]');
-
-  function updateUI() {
-    const price = Number(priceSlider.value);
-
-    if (priceValue) priceValue.textContent = formatMoney(price);
-
-    const dyn = dynamicSavingsRange(price);
-    const savText = `$${dyn.min}–$${dyn.max}/mo`;
-
-    if (dynSavings) dynSavings.textContent = savText;
-    if (msSavingsRange) msSavingsRange.textContent = savText;
-    if (heroSavingsPill) heroSavingsPill.textContent = `Save ~$${dyn.min}–$${dyn.max}/mo`;
-
-    if (priceBandOK) setBand(priceBandOK, Number(priceSlider.min), Number(priceSlider.max), LEAF_PRICE_MIN, LEAF_PRICE_MAX);
-    if (priceBandFill) setFill(priceBandFill, Number(priceSlider.min), Number(priceSlider.max), price);
-
-    const costClass = classifyCost(price);
-
-    if (costBadge) {
-      if (costClass === "unreal_low") setBadge(costBadge, "bad", "Unrealistic");
-      else if (costClass === "low") setBadge(costBadge, "warn", "Low (verify scope)");
-      else if (costClass === "over") setBadge(costBadge, "bad", "Overpriced");
-      else if (costClass === "likely_over") setBadge(costBadge, "warn", "Likely overpriced");
-      else setBadge(costBadge, "good", "Within range");
-    }
-
-    const msg = quickReadMessage(costClass);
-
-    if (overallBadge) {
-      if (costClass === "over") setBadge(overallBadge, "bad", "Major caution 🚩");
-      else if ((msg as any).tone === "good") setBadge(overallBadge, "good", "Looks good ✅");
-      else setBadge(overallBadge, "warn", "Proceed smart ⚠️");
-    }
-
-    if (overallHeadline) overallHeadline.textContent = (msg as any).headline;
-
-    renderList(quickReadWhy, (msg as any).why);
-    renderList(qVisible, (msg as any).qVisible);
-    renderList(qMore, (msg as any).qMore);
-
-    const net = computeNetCostRange(price);
-    const netMin = Math.min(net.netLow, net.netHigh);
-    const netMax = Math.max(net.netLow, net.netHigh);
-    if (msNetCostRange) msNetCostRange.textContent = formatMoneyRange(netMin, netMax);
-  }
-
-  function resetToLeafMid() {
-    const mid = Math.round((LEAF_PRICE_MIN + LEAF_PRICE_MAX) / 2);
-    priceSlider.value = String(mid);
-    updateUI();
-  }
-
-  const onInput = () => updateUI();
-  const onReset = () => resetToLeafMid();
-
-  priceSlider.addEventListener("input", onInput);
-  resetBtn?.addEventListener("click", onReset);
-
-  updateUI();
-
-  return () => {
-    priceSlider.removeEventListener("input", onInput);
-    resetBtn?.removeEventListener("click", onReset);
-  };
-}
-
     const cleanups: Array<() => void> = [];
-
-    // ✅ safer target: always initialize on the MAIN root for each snapshot page
-    document.querySelectorAll<HTMLElement>("main.leaf-page").forEach((el) => {
+    document.querySelectorAll(".leaf-page").forEach((el) => {
       const c = initLeafPage(el);
       if (typeof c === "function") cleanups.push(c);
     });
@@ -370,13 +392,14 @@ export default function JobReportPage() {
   if (!job) return <div style={{ padding: 24 }}>Job not found</div>;
   if (!pages.length) return <div style={{ padding: 24 }}>No snapshots yet</div>;
 
+  const ui = LEAF_SS_CONFIG.global.uiText;
+  const incentivesUi = LEAF_SS_CONFIG.global.incentives.labels;
+
   return (
     <>
-      {/* Full styling (no Tailwind required) */}
       <style jsx global>{`
-        :root { --leaf:#43a419; }
+        :root { --leaf: ${LEAF_SS_CONFIG.global.leafBrandColorHex || "#43a419"}; }
 
-        /* isolate from v0 admin css */
         .leafRoot {
           background: #000;
           color: #fff;
@@ -499,7 +522,6 @@ export default function JobReportPage() {
         .cardMeta{ font-size: 12px; line-height: 1.35; }
         .cardMeta b{ font-weight: 800; }
 
-        /* Slider block */
         .sliderBox{
           border-radius: 18px;
           border: 1px solid rgba(38,38,38,1);
@@ -511,7 +533,6 @@ export default function JobReportPage() {
         .smallLabel{ font-size: 12px; color: rgba(163,163,163,1); }
         .priceText{ font-size: 14px; font-weight: 800; }
 
-        /* badges via data-tone */
         .badge{
           font-size: 11px;
           padding: 4px 10px;
@@ -548,8 +569,11 @@ export default function JobReportPage() {
           color: #fff;
           cursor:pointer;
         }
+        .btnSmall.active{
+          border-color: rgba(67,164,25,.65);
+          box-shadow: 0 0 0 2px rgba(67,164,25,.18) inset;
+        }
 
-        /* Range band visuals */
         .sliderWrap{ position: relative; padding-top: 10px; }
         input[type="range"]{
           -webkit-appearance: none;
@@ -650,7 +674,7 @@ export default function JobReportPage() {
         <header className="leafHeader">
           <div className="leafHeaderInner">
             <div>
-              <div className="leafTitle">LEAF System Snapshot</div>
+              <div className="leafTitle">{ui.headerTitle || "LEAF System Snapshot"}</div>
               <div className="leafSub">
                 <span id="pageLabel">Snapshot 1 of {pages.length}</span>
               </div>
@@ -665,9 +689,9 @@ export default function JobReportPage() {
 
         {/* Pages */}
         <div id="pages" className="snapScroll">
-          {pages.map((p) => (
+          {pages.map((p, i) => (
             <div key={p.id} className="snapPage">
-              <main className="leafPage leaf-page">
+              <main className="leafPage leaf-page" data-page-index={String(i)}>
                 {/* HERO */}
                 <section className="glass">
                   <div className="h1">
@@ -676,7 +700,7 @@ export default function JobReportPage() {
                   <div style={{ fontSize: 13, fontWeight: 700, marginTop: 4, color: "rgba(229,229,229,1)" }}>
                     Upgrade for: {p.existingSubtype || "Mixed / Unknown"}
                   </div>
-                  <div className="subText">LEAF provides ranges so you can evaluate contractor quotes with confidence.</div>
+                  <div className="subText">{ui.heroHelper}</div>
 
                   <div className="pillRow">
                     <span className="pill pillLeaf" data-el="heroSavingsPill">
@@ -685,15 +709,13 @@ export default function JobReportPage() {
                     <span className="pill">~30–45% less CO₂</span>
                   </div>
 
-                  <div className="subText">
-                    Note: higher-priced systems can increase savings slightly — but ROI can drop if the added cost doesn’t pay back over time.
-                  </div>
+                  <div className="subText">{ui.heroNote}</div>
                 </section>
 
                 {/* CURRENT */}
                 <section className="glass" style={{ borderColor: "rgba(239,68,68,.30)" }}>
                   <div className="sectionTitleRow">
-                    <div className="h2">📷 Current system</div>
+                    <div className="h2">{ui.sections.currentTitle}</div>
                     <span className="chip chipRed">Near end of life</span>
                   </div>
 
@@ -701,12 +723,8 @@ export default function JobReportPage() {
                     <div className="thumb" />
                     <div className="cardMeta">
                       <div style={{ fontWeight: 800, marginBottom: 6 }}>Existing {p.existingSubtype || "system"}</div>
-                      <div>
-                        Age: <b>{p.ageYears ?? "—"} yrs</b>
-                      </div>
-                      <div>
-                        Wear: <b>{p.wear ?? "—"}/5</b>
-                      </div>
+                      <div>Age: <b>{p.ageYears ?? "—"} yrs</b></div>
+                      <div>Wear: <b>{p.wear ?? "—"}/5</b></div>
                     </div>
                   </div>
                 </section>
@@ -714,8 +732,8 @@ export default function JobReportPage() {
                 {/* RECOMMENDED */}
                 <section className="glass" style={{ borderColor: "rgba(67,164,25,.35)" }}>
                   <div className="sectionTitleRow">
-                    <div className="h2">✨ Recommended upgrade</div>
-                    <span className="chip">High efficiency</span>
+                    <div className="h2">{ui.sections.recommendedTitle}</div>
+                    <span className="chip" data-el="recommendedStatusPill">High efficiency</span>
                   </div>
 
                   <div className="cardRow">
@@ -724,14 +742,14 @@ export default function JobReportPage() {
                       <div style={{ fontWeight: 800, marginBottom: 6 }} data-el="recommendedName">
                         {p.suggestedName}
                       </div>
-                      <div>
-                        Estimated cost: <b>{money(p.estCost)}</b>
-                      </div>
-                      <div>
-                        Est. savings / yr: <b>{money(p.estAnnualSavings)}</b>
-                      </div>
-                      <div>
-                        Payback: <b>{p.estPaybackYears ?? "—"} yrs</b>
+                      <div>Estimated cost: <b>{money(p.estCost)}</b></div>
+                      <div>Est. savings / yr: <b>{money(p.estAnnualSavings)}</b></div>
+                      <div>Payback: <b>{p.estPaybackYears ?? "—"} yrs</b></div>
+
+                      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                        <button className="btnSmall" data-el="tierBtn" data-tier="good">Good</button>
+                        <button className="btnSmall active" data-el="tierBtn" data-tier="better">Better</button>
+                        <button className="btnSmall" data-el="tierBtn" data-tier="best">Best</button>
                       </div>
                     </div>
                   </div>
@@ -741,19 +759,13 @@ export default function JobReportPage() {
                 <section className="glass">
                   <div className="rowBetween" style={{ alignItems: "flex-start" }}>
                     <div>
-                      <div className="h2">🎚️ Test your quote</div>
-                      <div className="subText">
-                        Slide the price. Savings bumps slightly with higher system cost — but ROI can drop if price rises faster than savings.
-                      </div>
+                      <div className="h2">{ui.sections.testQuoteTitle}</div>
+                      <div className="subText">{ui.sections.testQuoteHelper}</div>
                     </div>
 
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <button className="btnSmall" data-el="resetBtn">
-                        Reset
-                      </button>
-                      <span className="badge badgeSquare" data-tone="good" data-el="overallBadge">
-                        Looks good ✅
-                      </span>
+                      <button className="btnSmall" data-el="resetBtn">{ui.buttons.reset}</button>
+                      <span className="badge badgeSquare" data-tone="good" data-el="overallBadge">Looks good ✅</span>
                     </div>
                   </div>
 
@@ -761,12 +773,8 @@ export default function JobReportPage() {
                     <div className="rowBetween">
                       <div className="smallLabel">Contractor price</div>
                       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                        <span className="badge" data-tone="good" data-el="costBadge">
-                          Within range
-                        </span>
-                        <div className="priceText" data-el="priceValue">
-                          $6,000
-                        </div>
+                        <span className="badge" data-tone="good" data-el="costBadge">Within range</span>
+                        <div className="priceText" data-el="priceValue">$6,000</div>
                       </div>
                     </div>
 
@@ -775,11 +783,18 @@ export default function JobReportPage() {
                         <div className="fill" data-el="priceBandFill"></div>
                         <div className="ok" data-el="priceBandOK"></div>
                       </div>
-                      <input data-el="priceSlider" type="range" min="3000" max="15000" step="100" defaultValue="6000" />
+                      <input
+                        data-el="priceSlider"
+                        type="range"
+                        min={String(LEAF_SS_CONFIG.global.slider.min)}
+                        max={String(LEAF_SS_CONFIG.global.slider.max)}
+                        step={String(LEAF_SS_CONFIG.global.slider.step)}
+                        defaultValue="6000"
+                      />
                     </div>
 
                     <div className="subText" style={{ marginTop: 10 }}>
-                      LEAF price range: <b>$5,000–$7,000</b>
+                      LEAF price range: <b data-el="leafRangeText">$5,000–$7,000</b>
                     </div>
                     <div className="subText">
                       Estimated savings at this price: <b data-el="dynamicSavingsRange">$19–$35/mo</b>
@@ -787,7 +802,7 @@ export default function JobReportPage() {
                   </div>
 
                   <div className="sliderBox" style={{ background: "rgba(0,0,0,.30)" }}>
-                    <div className="smallLabel">Quick read</div>
+                    <div className="smallLabel">{ui.sections.quickReadTitle}</div>
                     <div style={{ fontWeight: 800, marginTop: 6 }} data-el="overallHeadline">
                       This looks like a solid deal.
                     </div>
@@ -799,38 +814,40 @@ export default function JobReportPage() {
 
                     <details style={{ marginTop: 10 }}>
                       <summary style={{ cursor: "pointer", fontSize: 11, color: "rgba(110,231,183,1)", fontWeight: 700 }}>
-                        Why this message + more questions
+                        {ui.sections.quickReadExpand}
                       </summary>
                       <div style={{ marginTop: 10, fontSize: 11, color: "rgba(229,229,229,1)" }}>
-                        <div style={{ fontWeight: 800, marginBottom: 6 }}>Why LEAF is saying this</div>
+                        <div style={{ fontWeight: 800, marginBottom: 6 }}>{ui.sections.quickReadWhyTitle}</div>
                         <ul data-el="quickReadWhy" style={{ paddingLeft: 16, margin: 0 }} />
                         <div style={{ height: 10 }} />
-                        <div style={{ fontWeight: 800, marginBottom: 6 }}>More questions (optional)</div>
+                        <div style={{ fontWeight: 800, marginBottom: 6 }}>{ui.sections.quickReadMoreQuestionsTitle}</div>
                         <ul data-el="quickReadQuestionsMore" style={{ paddingLeft: 16, margin: 0 }} />
                       </div>
                     </details>
                   </div>
                 </section>
 
-                {/* INCENTIVES (REAL) */}
+                {/* INCENTIVES */}
                 <details className="glass">
                   <summary className="summaryRow">
                     <div>
-                      <div className="h2">🏷️ Incentives & rebates</div>
+                      <div className="h2">{incentivesUi.sectionTitle}</div>
                       <div className="subText" style={{ marginTop: 4 }}>
                         {p.incentives.length
                           ? `${p.incentives.length} incentive${p.incentives.length === 1 ? "" : "s"} matched`
                           : "No incentives matched"}
                       </div>
                     </div>
-                    <div className="summaryHint">Tap for details</div>
+                    <div className="summaryHint">{ui.sections.rangeDetailsTap}</div>
                   </summary>
 
                   <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
                     {p.incentives.length === 0 ? (
-                      <div className="subText">No incentives matched this upgrade. Check Incentives tags + this system type.</div>
+                      <div className="subText">
+                        No incentives matched this upgrade. Check Incentives tags + this system type.
+                      </div>
                     ) : (
-                      p.incentives.map((r: any) => {
+                      p.incentives.map((r) => {
                         const amt = incentiveAmountText(r);
                         return (
                           <div key={r.id} className="incentiveCard">
@@ -849,24 +866,35 @@ export default function JobReportPage() {
                 {/* DECISION */}
                 <section className="glass">
                   <div className="rowBetween">
-                    <div className="h2">🧠 Does this decision make sense?</div>
-                    <span className="badge" data-tone="good">
-                      Likely yes ✅
-                    </span>
+                    <div className="h2">{ui.sections.decisionTitle}</div>
+                    <span className="badge" data-tone="good" data-el="decisionBadge">Likely yes ✅</span>
                   </div>
 
                   <div className="sliderBox" style={{ marginTop: 12 }}>
+                    <div style={{ fontWeight: 900 }} data-el="decisionHeadline">This looks financially reasonable.</div>
+                    <div className="subText" data-el="decisionText" style={{ marginTop: 6 }}>
+                      If the contractor quote lands within the LEAF range, this is typically a strong replacement decision.
+                    </div>
+
+                    <div style={{ height: 10 }} />
+
                     <div className="rowBetween">
                       <div className="smallLabel">Estimated net cost (after incentives)</div>
-                      <div className="priceText" data-el="msNetCostRange">
-                        $3,500–$4,500
-                      </div>
+                      <div className="priceText" data-el="msNetCostRange">$3,500–$4,500</div>
                     </div>
                     <div className="subText" style={{ marginTop: 8 }}>
                       Based on incentive estimates shown above (contractor confirms final eligibility).
                     </div>
                     <div className="subText" style={{ marginTop: 8 }}>
                       Estimated savings (at this price): <b data-el="msSavingsRange">$19–$35/mo</b>
+                    </div>
+
+                    <div style={{ height: 10 }} />
+                    <div className="subText">
+                      <b data-el="msValueCheck">Within range ✅</b>
+                    </div>
+                    <div className="subText" data-el="msMeaning">
+                      Quotes in-range usually indicate predictable scope + fair pricing.
                     </div>
                   </div>
                 </section>
@@ -878,8 +906,8 @@ export default function JobReportPage() {
         {/* CTA */}
         <div className="ctaBar">
           <div className="ctaInner">
-            <button className="ctaBtn">🔎 Get an exact bid from a contractor</button>
-            <div className="ctaNote">Compare the quote against your LEAF range</div>
+            <button className="ctaBtn">{ui.buttons.ctaPrimary}</button>
+            <div className="ctaNote">{ui.ctaFooterText}</div>
           </div>
         </div>
       </div>
