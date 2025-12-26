@@ -107,19 +107,21 @@ export default function JobReportPage() {
         (r: any) => !(r as any).disabled
       );
 
-      return {
-        id: s?.id || `page_${idx}`,
-        existingType,
-        existingSubtype,
-        ageYears: s?.existing?.ageYears ?? null,
-        wear: s?.existing?.wear ?? null,
-        suggestedName: String(s?.suggested?.name || "Suggested upgrade").trim(),
-        estCost: s?.suggested?.estCost ?? null,
-        estAnnualSavings: s?.suggested?.estAnnualSavings ?? null,
-        estPaybackYears: s?.suggested?.estPaybackYears ?? null,
-        tags,
-        incentives,
-      };
+   return {
+  id: s?.id || `page_${idx}`,
+  existingType,
+  existingSubtype,
+  ageYears: s?.existing?.ageYears ?? null,
+  wear: s?.existing?.wear ?? null,
+  suggestedName: String(s?.suggested?.name || "Suggested upgrade").trim(),
+  estCost: s?.suggested?.estCost ?? null,
+  estAnnualSavings: s?.suggested?.estAnnualSavings ?? null,
+  estPaybackYears: s?.suggested?.estPaybackYears ?? null,
+  catalogSystemId: catalogId || null,
+  tags,
+  incentives,
+};
+
     });
   }, [snaps]);
 
@@ -464,14 +466,18 @@ const snapshot = getSnapshotByIndex(pageIndex, catalogId);
   if (!job) return <div style={{ padding: 24 }}>Job not found</div>;
   if (!pages.length) return <div style={{ padding: 24 }}>No snapshots yet</div>;
 
-  const ui = LEAF_SS_CONFIG.global.uiText;
-  const incentivesUi = LEAF_SS_CONFIG.global.incentives.labels;
+ const effectiveConfig =
+  typeof window === "undefined" ? LEAF_SS_CONFIG : getEffectiveLeafConfig();
+
+const ui = effectiveConfig.global.uiText;
+const incentivesUi = effectiveConfig.global.incentives.labels;
+
 
   return (
     <>
       {/* Full styling (no Tailwind required) */}
       <style jsx global>{`
-        :root { --leaf:${LEAF_SS_CONFIG.global.leafBrandColorHex || "#43a419"}; }
+        :root { --leaf:${effectiveConfig.global.leafBrandColorHex || "#43a419"}; }
 
         /* isolate from v0 admin css */
         .leafRoot {
@@ -785,11 +791,13 @@ const snapshot = getSnapshotByIndex(pageIndex, catalogId);
         <div id="pages" className="snapScroll">
           {pages.map((p, idx) => (
             <div key={p.id} className="snapPage">
-              <main
+          <main
   className="leafPage leaf-page"
   data-page-index={idx}
   data-catalog-id={p.catalogSystemId || ""}
-/>
+>
+
+
 
                 {/* HERO */}
                 <section className="glass">
