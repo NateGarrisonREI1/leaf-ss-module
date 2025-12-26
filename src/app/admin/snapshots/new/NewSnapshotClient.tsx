@@ -59,39 +59,48 @@ export default function NewSnapshotClient() {
       return;
     }
 
-    const draft: SnapshotDraft = {
-      id: `snap_${Math.random().toString(16).slice(2)}_${Date.now()}`,
-      jobId: job.id,
-      systemId: existingSystem.id,
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
+ function onSave() {
+  if (!job || !existingSystem) return;
 
-      existing: {
-        type: existingSystem.type ?? "",
-        subtype: existingSystem.subtype ?? "",
-        ageYears: existingSystem.ageYears ?? null,
-        operational: existingSystem.operational ?? "",
-        wear: existingSystem.wear ?? null,
-        maintenance: existingSystem.maintenance ?? "",
-      },
-
-      suggested: {
-  name: suggestedName.trim(),
-
-  // Optional catalog reference (future-ready)
-  catalogSystemId: null,
-
-  estCost: parseNum(estCost),
-  estAnnualSavings: parseNum(estAnnualSavings),
-  estPaybackYears: parseNum(estPaybackYears),
-  notes: notes.trim(),
-},
-
-    upsertLocalSnapshot(draft);
-
-    // back to job page where Saved Snapshots should show it
-    router.push(`/admin/jobs/${job.id}?snapSaved=1`);
+  if (!suggestedName.trim()) {
+    alert("Suggested system name is required.");
+    return;
   }
+
+  const draft: SnapshotDraft = {
+    id: `snap_${Math.random().toString(16).slice(2)}_${Date.now()}`,
+    jobId: job.id,
+    systemId: existingSystem.id,
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+
+    existing: {
+      type: existingSystem.type ?? "",
+      subtype: existingSystem.subtype ?? "",
+      ageYears: existingSystem.ageYears ?? null,
+      operational: existingSystem.operational ?? "",
+      wear: existingSystem.wear ?? null,
+      maintenance: existingSystem.maintenance ?? "",
+    },
+
+    suggested: {
+      name: suggestedName.trim(),
+
+      // Optional catalog reference (future-ready)
+      catalogSystemId: null,
+
+      estCost: parseNum(estCost),
+      estAnnualSavings: parseNum(estAnnualSavings),
+      estPaybackYears: parseNum(estPaybackYears),
+      notes: notes.trim(),
+    },
+  };
+
+  upsertLocalSnapshot(draft);
+
+  // back to job page where Saved Snapshots should show it
+  router.push(`/admin/jobs/${job.id}?snapSaved=1`);
+}
 
   if (!jobId || !systemId) {
     return (
