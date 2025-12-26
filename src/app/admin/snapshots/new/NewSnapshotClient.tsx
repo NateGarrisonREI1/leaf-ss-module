@@ -322,13 +322,16 @@ export default function NewSnapshotClient({
   // ---------------- Incentives integration (same page / same "backend") ----------------
   const incentives: IncentiveResource[] = useMemo(() => {
     if (!existingSystem) return [];
-    const tags: string[] = [
-      existingSystem.subtype,
-      existingSystem.fuel,
-      existingSystem.type,
-    ]
-      .map((x: any) => String(x || "").trim())
-      .filter(Boolean);
+  const tags: string[] = [
+  existingSystem.subtype,
+  // Some datasets have a fuel-like field; don't break types if it's missing.
+  (existingSystem as any).fuel,
+  (existingSystem as any).fuelType,
+  (existingSystem as any).fuelSource,
+  existingSystem.type,
+]
+  .map((x: any) => String(x || "").trim())
+  .filter(Boolean);
 
     return getIncentivesForSystemType(existingSystem.type || "", { tags });
   }, [existingSystem]);
