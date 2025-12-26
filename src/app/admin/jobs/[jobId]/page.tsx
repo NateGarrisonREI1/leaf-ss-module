@@ -33,11 +33,8 @@ export default function JobDetailPage() {
     return findLocalJob(jobId) ?? MOCK_JOBS.find((j) => j.id === jobId) ?? null;
   }, [jobId]);
 
-  // load snapshots (note: this reads localStorage at render time)
-  const jobSnapshots: SnapshotDraft[] = useMemo(() => {
-    loadLocalSnapshots();
-    return jobId ? snapshotsForJob(jobId) : [];
-  }, [jobId]);
+  // local re-render trigger after edits/deletes (lightweight)
+  const [bump, setBump] = useState(0);
 
   // editing state for snapshots
   const [editingSnapId, setEditingSnapId] = useState<string | null>(null);
@@ -47,11 +44,7 @@ export default function JobDetailPage() {
   const [draftPayback, setDraftPayback] = useState<string>("");
   const [draftNotes, setDraftNotes] = useState<string>("");
 
-  // local re-render trigger after edits/deletes (lightweight)
-  const [bump, setBump] = useState(0);
-
   const snapshots: SnapshotDraft[] = useMemo(() => {
-    // re-read after bump
     loadLocalSnapshots();
     return jobId ? snapshotsForJob(jobId) : [];
   }, [jobId, bump]);
@@ -164,9 +157,8 @@ export default function JobDetailPage() {
               ← Jobs
             </Link>
 
-            {/* ✅ UPDATED LINK */}
             <Link
-              href={`/admin/jobs/${jobId}/report`}
+              href={`/admin/jobs/${job.id}/report`}
               className="rei-btn rei-btnPrimary"
               style={{ textDecoration: "none", color: "inherit" }}
             >
@@ -254,8 +246,160 @@ export default function JobDetailPage() {
         </div>
       </div>
 
-      {/* SNAPSHOTS FOR THIS JOB */}
-      {/* (unchanged below) */}
+      {/* SAVED SNAPSHOTS */}
+      <div className="rei-card">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <div>
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>Saved Snapshots</div>
+            <div style={{ color: "var(--muted)" }}>
+              Edit and delete snapshots here (localStorage for now).
+            </div>
+          </div>
+
+          <Link href="/admin/snapshots" className="rei-btn" style={{ textDecoration: "none", color: "inherit" }}>
+            View all snapshots
+          </Link>
+        </div>
+
+        <div style={{ height: 12 }} />
+
+        {snapshots.length === 0 ? (
+          <div style={{ color: "var(--muted)" }}>
+            No snapshots saved for this job yet.
+            <div style={{ marginTop: 8, fontSize: 12 }}>
+              If you switched deployments, import your JSON export to restore local snapshots on this domain.
+            </div>
+          </div>
+        ) : (
+          <div style={{ border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1.5fr 0.9fr 0.9fr 0.8fr 1.4fr",
+                gap: 10,
+                padding: "12px 14px",
+                background: "rgba(16,24,40,.03)",
+                fontWeight: 900,
+                fontSize: 12,
+                color: "var(--muted)",
+              }}
+            >
+              <div>Existing</div>
+              <div>Suggested</div>
+              <div>Cost</div>
+              <div>Savings/yr</div>
+              <div>Updated</div>
+              <div style={{ textAlign: "right" }}>Actions</div>
+            </div>
+
+            {snapshots.map((snap) => {
+              const isEditing = editingSnapId === snap.id;
+
+              return (
+                <div
+                  key={snap.id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1.5fr 0.9fr 0.9fr 0.8fr 1.4fr",
+                    gap: 10,
+                    padding: "12px 14px",
+                    borderTop: "1px solid var(--border)",
+                    alignItems: "center",
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 900 }}>{snap.existing.type}</div>
+                    <div style={{ color: "var(--muted)", fontSize: 12 }}>{snap.existing.subtype}</div>
+                  </div>
+
+                  <div>
+                    {isEditing ? (
+                      <div style={{ display: "grid", gap: 6 }}>
+                        <input
+                          className="rei-input"
+                          value={draftName}
+                          onChange={(e) => setDraftName(e.target.value)}
+                          placeholder="Suggested system name"
+                        />
+                        <textarea
+                          className="rei-input"
+                          value={draftNotes}
+                          onChange={(e) => setDraftNotes(e.target.value)}
+                          placeholder="Notes"
+                          style={{ minHeight: 60, resize: "vertical" }}
+                        />
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ fontWeight: 900 }}>{snap.suggested.name}</div>
+                        <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                          {snap.suggested.catalogSystemId ? "From catalog" : "Manual"}
+                          {snap.suggested.notes ? ` • ${snap.suggested.notes}` : ""}
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <div style={{ color: "var(--muted)" }}>
+                    {isEditing ? (
+                      <input
+                        className="rei-input"
+                        value={draftCost}
+                        onChange={(e) => setDraftCost(e.target.value)}
+                        placeholder="Cost"
+                        inputMode="numeric"
+                      />
+                    ) : (
+                      snap.suggested.estCost ?? "—"
+                    )}
+                  </div>
+
+                  <div style={{ color: "var(--muted)" }}>
+                    {isEditing ? (
+                      <input
+                        className="rei-input"
+                        value={draftSavings}
+                        onChange={(e) => setDraftSavings(e.target.value)}
+                        placeholder="Savings/yr"
+                        inputMode="numeric"
+                      />
+                    ) : (
+                      snap.suggested.estAnnualSavings ?? "—"
+                    )}
+                  </div>
+
+                  <div style={{ color: "var(--muted)" }}>{formatDate(snap.updatedAt)}</div>
+
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, flexWrap: "wrap" }}>
+                    {isEditing ? (
+                      <>
+                        <button className="rei-btn rei-btnPrimary" type="button" onClick={() => saveSnapshot(snap)}>
+                          Save
+                        </button>
+                        <button className="rei-btn" type="button" onClick={cancelEditSnapshot}>
+                          Cancel
+                        </button>
+                        <button className="rei-btn" type="button" onClick={() => deleteSnapshot(snap.id)}>
+                          Delete
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="rei-btn" type="button" onClick={() => startEditSnapshot(snap)}>
+                          Edit
+                        </button>
+                        <button className="rei-btn" type="button" onClick={() => deleteSnapshot(snap.id)}>
+                          Delete
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
