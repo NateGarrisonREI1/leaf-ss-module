@@ -74,13 +74,9 @@ export default function JobReportPage() {
 
       const catalogId = s?.suggested?.catalogSystemId || null;
       const catalog = catalogId ? (MOCK_SYSTEMS as any[]).find((x) => x.id === catalogId) : null;
-      const tags: string[] = (catalog?.tags || [])
-        .map((t: any) => normalizeTag(String(t || "")))
-        .filter(Boolean);
+      const tags: string[] = (catalog?.tags || []).map((t: any) => normalizeTag(String(t || ""))).filter(Boolean);
 
-      const incentives = getIncentivesForSystemType(existingType, { tags }).filter(
-        (r: any) => !(r as any).disabled
-      );
+      const incentives = getIncentivesForSystemType(existingType, { tags }).filter((r: any) => !(r as any).disabled);
 
       return {
         id: s?.id || `page_${idx}`,
@@ -101,20 +97,14 @@ export default function JobReportPage() {
   useEffect(() => {
     const pagesEl = document.getElementById("pages");
     const pagerEl = document.getElementById("pager");
-    const dots = pagerEl
-      ? Array.from(pagerEl.querySelectorAll<HTMLButtonElement>(".dot"))
-      : [];
+    const dots = pagerEl ? Array.from(pagerEl.querySelectorAll<HTMLButtonElement>(".dot")) : [];
     const pageLabel = document.getElementById("pageLabel");
 
     function setActiveDot(i: number) {
       dots.forEach((d, idx) => d.classList.toggle("active", idx === i));
-      const tpl =
-        LEAF_SS_CONFIG.global.uiText.headerPageLabelTemplate ||
-        "Snapshot {current} of {total}";
+      const tpl = LEAF_SS_CONFIG.global.uiText.headerPageLabelTemplate || "Snapshot {current} of {total}";
       if (pageLabel)
-        pageLabel.textContent = tpl
-          .replace("{current}", String(i + 1))
-          .replace("{total}", String(dots.length || 0));
+        pageLabel.textContent = tpl.replace("{current}", String(i + 1)).replace("{total}", String(dots.length || 0));
     }
 
     function scrollToPage(i: number) {
@@ -151,45 +141,24 @@ export default function JobReportPage() {
     const globalIncentives = global.incentives;
     const msgLib = LEAF_SS_CONFIG.messageLibrary;
 
-    const clamp = (v: number, min: number, max: number) =>
-      Math.min(max, Math.max(min, v));
-    const formatMoney = (n: number) =>
-      "$" + Math.round(n).toLocaleString(global.format.currencyLocale || "en-US");
-    const formatMoneyRange = (a: number, b: number) =>
-      `${formatMoney(a)}–${formatMoney(b)}`;
+    const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
+    const formatMoney = (n: number) => "$" + Math.round(n).toLocaleString(global.format.currencyLocale || "en-US");
+    const formatMoneyRange = (a: number, b: number) => `${formatMoney(a)}–${formatMoney(b)}`;
 
-    function setBadge(
-      el: HTMLElement,
-      tone: "good" | "warn" | "bad" | "neutral",
-      text: string
-    ) {
+    function setBadge(el: HTMLElement, tone: "good" | "warn" | "bad" | "neutral", text: string) {
       el.setAttribute("data-tone", tone);
       el.textContent = text;
     }
 
-    function setBand(
-      okEl: HTMLElement,
-      sliderMin: number,
-      sliderMax: number,
-      okMin: number,
-      okMax: number
-    ) {
+    function setBand(okEl: HTMLElement, sliderMin: number, sliderMax: number, okMin: number, okMax: number) {
       const span = sliderMax - sliderMin || 1;
       const L = ((okMin - sliderMin) / span) * 100;
       const R = ((okMax - sliderMin) / span) * 100;
       okEl.style.left = `${clamp(L, 0, 100)}%`;
-      okEl.style.width = `${Math.max(
-        0,
-        clamp(R, 0, 100) - clamp(L, 0, 100)
-      )}%`;
+      okEl.style.width = `${Math.max(0, clamp(R, 0, 100) - clamp(L, 0, 100))}%`;
     }
 
-    function setFill(
-      fillEl: HTMLElement,
-      sliderMin: number,
-      sliderMax: number,
-      value: number
-    ) {
+    function setFill(fillEl: HTMLElement, sliderMin: number, sliderMax: number, value: number) {
       const span = sliderMax - sliderMin || 1;
       const pct = ((value - sliderMin) / span) * 100;
       fillEl.style.width = `${clamp(pct, 0, 100)}%`;
@@ -211,9 +180,10 @@ export default function JobReportPage() {
     function initLeafPage(root: Element) {
       const $ = (sel: string) => root.querySelector(sel) as HTMLElement | null;
 
-      const priceSlider =
-        root.querySelector<HTMLInputElement>('[data-el="priceSlider"]');
-      if (!priceSlider) return () => {};
+      // ✅ TS-null-safe slider (this fixes the “possibly null” build error permanently)
+      const priceSliderEl = root.querySelector<HTMLInputElement>('[data-el="priceSlider"]');
+      if (!priceSliderEl) return () => {};
+      const priceSlider = priceSliderEl;
 
       const pageIndex = Number(root.getAttribute("data-page-index") || "0");
       const snapshot = getSnapshotByIndex(pageIndex);
@@ -243,45 +213,29 @@ export default function JobReportPage() {
       const leafRangeText = $('[data-el="leafRangeText"]');
       const resetBtn = $('[data-el="resetBtn"]');
 
-      const tierButtons = Array.from(
-        root.querySelectorAll<HTMLButtonElement>('[data-el="tierBtn"]')
-      );
+      const tierButtons = Array.from(root.querySelectorAll<HTMLButtonElement>('[data-el="tierBtn"]'));
 
+      // Slider bounds from global config
       priceSlider.min = String(globalSlider.min);
       priceSlider.max = String(globalSlider.max);
       priceSlider.step = String(globalSlider.step);
 
       function getRuleOverrides() {
-        // ✅ FIX: don’t let TS infer {}. Cast to a shaped object / any.
+        // ✅ prevent TS from inferring {}
         const snapOverrides = (snapshot?.rulesOverrides ?? {}) as {
-          costClassThresholds?: {
-            unrealLowOffsetFromMin?: number;
-            overpricedOffsetFromMax?: number;
-          };
-          dynamicSavingsRule?: {
-            type?: string;
-            stepSizeDollars?: number;
-            bumpPerStepMonthlyDollars?: number;
-          };
+          costClassThresholds?: { unrealLowOffsetFromMin?: number; overpricedOffsetFromMax?: number };
+          dynamicSavingsRule?: { type?: string; stepSizeDollars?: number; bumpPerStepMonthlyDollars?: number };
         };
 
-        const thresholds =
-          snapOverrides.costClassThresholds ||
-          global.rangesAndClassifications.costClassThresholds;
-
-        const dynRule =
-          snapOverrides.dynamicSavingsRule ||
-          global.rangesAndClassifications.dynamicSavingsRule;
-
+        const thresholds = snapOverrides.costClassThresholds || global.rangesAndClassifications.costClassThresholds;
+        const dynRule = snapOverrides.dynamicSavingsRule || global.rangesAndClassifications.dynamicSavingsRule;
         return { thresholds, dynRule };
       }
 
       function setTier(next: LeafTierKey) {
         tierKey = next;
 
-        tierButtons.forEach((b) =>
-          b.classList.toggle("active", b.dataset.tier === tierKey)
-        );
+        tierButtons.forEach((b) => b.classList.toggle("active", b.dataset.tier === tierKey));
 
         const t = getTier(snapshot, tierKey);
         const min = Number(t?.leafPriceRange?.min || globalSlider.min);
@@ -323,8 +277,7 @@ export default function JobReportPage() {
         const savText = `${formatMoney(dyn.min)}–${formatMoney(dyn.max)}/mo`;
         if (dynSavings) dynSavings.textContent = savText;
         if (msSavingsRange) msSavingsRange.textContent = savText;
-        if (heroSavingsPill)
-          heroSavingsPill.textContent = `Save ~${formatMoney(dyn.min)}–${formatMoney(dyn.max)}/mo`;
+        if (heroSavingsPill) heroSavingsPill.textContent = `Save ~${formatMoney(dyn.min)}–${formatMoney(dyn.max)}/mo`;
 
         if (leafRangeText) leafRangeText.textContent = formatMoneyRange(tierMin, tierMax);
 
@@ -341,12 +294,7 @@ export default function JobReportPage() {
 
         const costBadgeText = (msgLib as any).costBadgeTextByClass?.[costClass] || "—";
         if (costBadge) {
-          const tone =
-            costClass === "in"
-              ? "good"
-              : costClass === "low" || costClass === "likely_over"
-              ? "warn"
-              : "bad";
+          const tone = costClass === "in" ? "good" : costClass === "low" || costClass === "likely_over" ? "warn" : "bad";
           setBadge(costBadge, tone, costBadgeText);
         }
 
@@ -391,9 +339,7 @@ export default function JobReportPage() {
       }
 
       const onTierClick = (e: Event) => {
-        const btn = (e.target as HTMLElement | null)?.closest?.(
-          '[data-el="tierBtn"]'
-        ) as HTMLButtonElement | null;
+        const btn = (e.target as HTMLElement | null)?.closest?.('[data-el="tierBtn"]') as HTMLButtonElement | null;
         if (!btn) return;
         const t = (btn.dataset.tier || "better") as LeafTierKey;
         setTier(t);
@@ -436,17 +382,652 @@ export default function JobReportPage() {
   if (!pages.length) return <div style={{ padding: 24 }}>No snapshots yet</div>;
 
   const ui = LEAF_SS_CONFIG.global.uiText;
-  const incentivesUi = LEAF_SS_CONFIG.global.incentives.labels;
 
   return (
     <>
-      {/* (styles + JSX remain the same as your prior version) */}
-      {/* IMPORTANT: keep the JSX block you already pasted from the previous message.
-          This patch is ONLY about the TS error on snapOverrides typing. */}
-      {/* If you want, paste your current JSX/styles here and I’ll return a single-file
-          unified copy — but this fix alone should compile. */}
-      <div style={{ padding: 24 }}>
-        You replaced the logic section. Keep the rest of your file unchanged.
+      <style jsx global>{`
+        :root {
+          --leaf: ${LEAF_SS_CONFIG.global.leafBrandColorHex || "#43a419"};
+        }
+
+        .leafRoot {
+          background: #000;
+          color: #fff;
+          min-height: 100vh;
+          font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji",
+            "Segoe UI Emoji";
+        }
+
+        .leafHeader {
+          position: sticky;
+          top: 0;
+          z-index: 30;
+          background: rgba(0, 0, 0, 0.7);
+          border-bottom: 1px solid rgba(38, 38, 38, 1);
+          backdrop-filter: blur(10px);
+        }
+        .leafHeaderInner {
+          max-width: 420px;
+          margin: 0 auto;
+          padding: 12px 16px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+        }
+        .leafTitle {
+          font-size: 13px;
+          font-weight: 700;
+        }
+        .leafSub {
+          font-size: 11px;
+          color: rgba(163, 163, 163, 1);
+          margin-top: 2px;
+        }
+
+        .dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.22);
+          border: 1px solid rgba(255, 255, 255, 0.18);
+          cursor: pointer;
+          transition: transform 0.15s ease, background 0.15s ease;
+        }
+        .dot.active {
+          background: rgba(67, 164, 25, 0.95);
+          border-color: rgba(67, 164, 25, 0.75);
+          transform: scale(1.12);
+        }
+
+        .snapScroll {
+          display: flex;
+          overflow-x: auto;
+          scroll-snap-type: x mandatory;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
+        }
+        .snapScroll::-webkit-scrollbar {
+          display: none;
+        }
+        .snapPage {
+          scroll-snap-align: center;
+          width: 100%;
+          flex: 0 0 100%;
+        }
+
+        .leafPage {
+          max-width: 420px;
+          margin: 0 auto;
+          padding: 18px 16px 120px;
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+        }
+
+        .glass {
+          background: rgba(24, 24, 27, 0.78);
+          backdrop-filter: blur(12px);
+          border: 1px solid rgba(38, 38, 38, 1);
+          border-radius: 24px;
+          box-shadow: 0 18px 45px rgba(0, 0, 0, 0.42);
+          padding: 14px;
+        }
+
+        .sectionTitleRow {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          margin-bottom: 10px;
+        }
+        .h1 {
+          font-size: 18px;
+          font-weight: 800;
+          letter-spacing: -0.02em;
+        }
+        .h2 {
+          font-size: 13px;
+          font-weight: 700;
+        }
+        .subText {
+          font-size: 11px;
+          color: rgba(163, 163, 163, 1);
+          margin-top: 6px;
+        }
+        .pillRow {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          margin-top: 10px;
+        }
+        .pill {
+          font-size: 12px;
+          padding: 6px 10px;
+          border-radius: 999px;
+          border: 1px solid rgba(67, 164, 25, 0.35);
+          background: rgba(67, 164, 25, 0.18);
+          color: #fff;
+          font-weight: 700;
+        }
+        .pillLeaf {
+          background: var(--leaf);
+          color: #000;
+          border-color: rgba(0, 0, 0, 0.25);
+        }
+
+        .chip {
+          font-size: 11px;
+          padding: 4px 10px;
+          border-radius: 999px;
+          border: 1px solid rgba(16, 185, 129, 0.3);
+          background: rgba(16, 185, 129, 0.15);
+          color: rgba(209, 250, 229, 1);
+          font-weight: 700;
+          white-space: nowrap;
+        }
+        .chipRed {
+          border-color: rgba(239, 68, 68, 0.25);
+          background: rgba(239, 68, 68, 0.15);
+          color: rgba(254, 202, 202, 1);
+        }
+
+        .cardRow {
+          display: flex;
+          gap: 12px;
+        }
+        .thumb {
+          width: 92px;
+          height: 92px;
+          border-radius: 22px;
+          border: 1px solid rgba(38, 38, 38, 1);
+          background: rgba(10, 10, 10, 0.7);
+          flex: 0 0 auto;
+        }
+        .cardMeta {
+          font-size: 12px;
+          line-height: 1.35;
+        }
+        .cardMeta b {
+          font-weight: 800;
+        }
+
+        .tierRow {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          margin-top: 10px;
+        }
+        .tierBtn {
+          font-size: 12px;
+          padding: 8px 12px;
+          border-radius: 999px;
+          border: 1px solid rgba(38, 38, 38, 1);
+          background: rgba(10, 10, 10, 0.65);
+          color: #fff;
+          cursor: pointer;
+          font-weight: 800;
+        }
+        .tierBtn.active {
+          border-color: rgba(67, 164, 25, 0.65);
+          box-shadow: 0 0 0 4px rgba(67, 164, 25, 0.12);
+        }
+
+        .sliderBox {
+          border-radius: 18px;
+          border: 1px solid rgba(38, 38, 38, 1);
+          background: rgba(10, 10, 10, 0.65);
+          padding: 12px;
+          margin-top: 10px;
+        }
+        .rowBetween {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+        }
+        .smallLabel {
+          font-size: 12px;
+          color: rgba(163, 163, 163, 1);
+        }
+        .priceText {
+          font-size: 14px;
+          font-weight: 800;
+        }
+
+        .badge {
+          font-size: 11px;
+          padding: 4px 10px;
+          border-radius: 999px;
+          border: 1px solid rgba(16, 185, 129, 0.3);
+          background: rgba(16, 185, 129, 0.15);
+          color: rgba(209, 250, 229, 1);
+          font-weight: 700;
+          white-space: nowrap;
+        }
+        .badgeSquare {
+          border-radius: 10px;
+        }
+        .badge[data-tone="warn"] {
+          border-color: rgba(234, 179, 8, 0.3);
+          background: rgba(234, 179, 8, 0.15);
+          color: rgba(254, 249, 195, 1);
+        }
+        .badge[data-tone="bad"] {
+          border-color: rgba(239, 68, 68, 0.25);
+          background: rgba(239, 68, 68, 0.15);
+          color: rgba(254, 202, 202, 1);
+        }
+        .badge[data-tone="neutral"] {
+          border-color: rgba(82, 82, 82, 1);
+          background: rgba(38, 38, 38, 0.6);
+          color: rgba(229, 229, 229, 1);
+        }
+
+        .btnSmall {
+          font-size: 11px;
+          padding: 4px 10px;
+          border-radius: 999px;
+          border: 1px solid rgba(38, 38, 38, 1);
+          background: rgba(10, 10, 10, 0.65);
+          color: #fff;
+          cursor: pointer;
+        }
+
+        .sliderWrap {
+          position: relative;
+          padding-top: 10px;
+        }
+        input[type="range"] {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 100%;
+          height: 32px;
+          background: transparent;
+          outline: none;
+          position: relative;
+          z-index: 3;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 30px;
+          height: 30px;
+          border-radius: 999px;
+          background: var(--leaf);
+          border: 2px solid rgba(0, 0, 0, 0.55);
+          box-shadow: 0 12px 22px rgba(0, 0, 0, 0.45), 0 0 0 6px rgba(67, 164, 25, 0.12);
+          cursor: pointer;
+          margin-top: 1px;
+        }
+        .rangeBand {
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: 50%;
+          transform: translateY(-50%);
+          height: 14px;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          overflow: hidden;
+          z-index: 1;
+        }
+        .rangeBand .fill {
+          position: absolute;
+          top: 0;
+          bottom: 0;
+          left: 0;
+          width: 0%;
+          border-radius: 999px;
+          background: rgba(67, 164, 25, 0.18);
+          transition: width 0.06s linear;
+        }
+        .rangeBand .ok {
+          position: absolute;
+          top: 0;
+          bottom: 0;
+          left: 0%;
+          width: 0%;
+          border-radius: 999px;
+          background: linear-gradient(90deg, rgba(67, 164, 25, 0.18), rgba(67, 164, 25, 0.55), rgba(67, 164, 25, 0.18));
+          border: 1px solid rgba(67, 164, 25, 0.55);
+          box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25) inset, 0 0 16px rgba(67, 164, 25, 0.22);
+          pointer-events: none;
+        }
+
+        details summary {
+          list-style: none;
+        }
+        summary::-webkit-details-marker {
+          display: none;
+        }
+        .summaryRow {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          cursor: pointer;
+        }
+        .summaryHint {
+          font-size: 11px;
+          color: rgba(163, 163, 163, 1);
+        }
+
+        .incentiveCard {
+          border-radius: 18px;
+          border: 1px solid rgba(38, 38, 38, 1);
+          background: rgba(10, 10, 10, 0.65);
+          padding: 12px;
+        }
+        .incentiveTitle {
+          font-size: 12px;
+          font-weight: 800;
+        }
+        .incentiveBlurb {
+          margin-top: 6px;
+          font-size: 11px;
+          color: rgba(163, 163, 163, 1);
+        }
+
+        .ctaBar {
+          position: fixed;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          background: rgba(0, 0, 0, 0.8);
+          border-top: 1px solid rgba(38, 38, 38, 1);
+          backdrop-filter: blur(10px);
+        }
+        .ctaInner {
+          max-width: 420px;
+          margin: 0 auto;
+          padding: 12px 16px;
+        }
+        .ctaBtn {
+          width: 100%;
+          border: 0;
+          border-radius: 999px;
+          padding: 12px 14px;
+          font-size: 13px;
+          font-weight: 800;
+          background: var(--leaf);
+          color: #000;
+          cursor: pointer;
+        }
+        .ctaNote {
+          margin-top: 6px;
+          font-size: 11px;
+          color: rgba(163, 163, 163, 1);
+          text-align: center;
+        }
+      `}</style>
+
+      <div className="leafRoot">
+        {/* Header */}
+        <header className="leafHeader">
+          <div className="leafHeaderInner">
+            <div>
+              <div className="leafTitle">{ui.headerTitle || "LEAF System Snapshot"}</div>
+              <div className="leafSub">
+                <span id="pageLabel">Snapshot 1 of {pages.length}</span>
+              </div>
+            </div>
+
+            <div id="pager" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {pages.map((p, i) => (
+                <button key={p.id} className={`dot ${i === 0 ? "active" : ""}`} data-page={i} aria-label={`Go to snapshot ${i + 1}`} />
+              ))}
+            </div>
+          </div>
+        </header>
+
+        {/* Pages */}
+        <div id="pages" className="snapScroll">
+          {pages.map((p, i) => (
+            <div key={p.id} className="snapPage">
+              <main className="leafPage leaf-page" data-page-index={i}>
+                {/* HERO */}
+                <section className="glass">
+                  <div className="h1">
+                    {p.existingType || "System"} • {p.existingSubtype || "Unknown"}
+                  </div>
+
+                  <div className="subText">{ui.heroHelper || "LEAF provides ranges so you can evaluate contractor quotes with confidence."}</div>
+
+                  <div className="pillRow">
+                    <span className="pill pillLeaf" data-el="heroSavingsPill">
+                      Save ~$19–$35/mo
+                    </span>
+                    <span className="pill">~30–45% less CO₂</span>
+                  </div>
+
+                  <div className="subText">{ui.heroNote || "Note: higher-priced systems can increase savings slightly — but ROI can drop if the added cost doesn’t pay back over time."}</div>
+
+                  {/* Package selector (Good/Better/Best) */}
+                  <div className="tierRow" aria-label="Choose package">
+                    <button className="tierBtn" data-el="tierBtn" data-tier="good" type="button">
+                      Good
+                    </button>
+                    <button className="tierBtn active" data-el="tierBtn" data-tier="better" type="button">
+                      Better
+                    </button>
+                    <button className="tierBtn" data-el="tierBtn" data-tier="best" type="button">
+                      Best
+                    </button>
+                  </div>
+                </section>
+
+                {/* CURRENT */}
+                <section className="glass" style={{ borderColor: "rgba(239,68,68,.30)" }}>
+                  <div className="sectionTitleRow">
+                    <div className="h2">{ui.sections.currentTitle || "📷 Current system"}</div>
+                    <span className="chip chipRed">Near end of life</span>
+                  </div>
+
+                  <div className="cardRow">
+                    <div className="thumb" />
+                    <div className="cardMeta">
+                      <div style={{ fontWeight: 800, marginBottom: 6 }}>Existing {p.existingSubtype || "system"}</div>
+                      <div>
+                        Age: <b>{p.ageYears ?? "—"} yrs</b>
+                      </div>
+                      <div>
+                        Wear: <b>{p.wear ?? "—"}/5</b>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                {/* RECOMMENDED */}
+                <section className="glass" style={{ borderColor: "rgba(67,164,25,.35)" }}>
+                  <div className="sectionTitleRow">
+                    <div className="h2">{ui.sections.recommendedTitle || "✨ Recommended upgrade"}</div>
+                    <span className="chip" data-el="recommendedStatusPill">
+                      High efficiency
+                    </span>
+                  </div>
+
+                  <div className="cardRow">
+                    <div className="thumb" />
+                    <div className="cardMeta">
+                      <div style={{ fontWeight: 800, marginBottom: 6 }} data-el="recommendedName">
+                        {p.suggestedName}
+                      </div>
+                      <div>
+                        Estimated cost: <b>{money(p.estCost)}</b>
+                      </div>
+                      <div>
+                        Est. savings / yr: <b>{money(p.estAnnualSavings)}</b>
+                      </div>
+                      <div>
+                        Payback: <b>{p.estPaybackYears ?? "—"} yrs</b>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                {/* SLIDER */}
+                <section className="glass">
+                  <div className="rowBetween" style={{ alignItems: "flex-start" }}>
+                    <div>
+                      <div className="h2">{ui.sections.testQuoteTitle || "🎚️ Test your quote"}</div>
+                      <div className="subText">{ui.sections.testQuoteHelper || "Slide the price. Savings bumps slightly with higher system cost — but ROI can drop if price rises faster than savings."}</div>
+                    </div>
+
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <button className="btnSmall" data-el="resetBtn" type="button">
+                        {ui.buttons.reset || "Reset"}
+                      </button>
+                      <span className="badge badgeSquare" data-tone="good" data-el="overallBadge">
+                        Looks good ✅
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="sliderBox">
+                    <div className="rowBetween">
+                      <div className="smallLabel">Contractor price</div>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <span className="badge" data-tone="good" data-el="costBadge">
+                          Within range
+                        </span>
+                        <div className="priceText" data-el="priceValue">
+                          $6,000
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="sliderWrap">
+                      <div className="rangeBand" aria-hidden="true">
+                        <div className="fill" data-el="priceBandFill" />
+                        <div className="ok" data-el="priceBandOK" />
+                      </div>
+                      <input data-el="priceSlider" type="range" defaultValue="6000" />
+                    </div>
+
+                    <div className="subText" style={{ marginTop: 10 }}>
+                      LEAF price range: <b data-el="leafRangeText">$5,000–$7,000</b>
+                    </div>
+                    <div className="subText">
+                      Estimated savings at this price: <b data-el="dynamicSavingsRange">$19–$35/mo</b>
+                    </div>
+                  </div>
+
+                  <div className="sliderBox" style={{ background: "rgba(0,0,0,.30)" }}>
+                    <div className="smallLabel">{ui.sections.quickReadTitle || "Quick read"}</div>
+                    <div style={{ fontWeight: 800, marginTop: 6 }} data-el="overallHeadline">
+                      This looks like a solid deal.
+                    </div>
+
+                    <div style={{ marginTop: 10, fontSize: 11, color: "rgba(229,229,229,1)" }}>
+                      <div style={{ fontWeight: 800, marginBottom: 6 }}>Good questions to ask the contractor</div>
+                      <ul data-el="quickReadQuestionsVisible" style={{ paddingLeft: 16, margin: 0 }} />
+                    </div>
+
+                    <details style={{ marginTop: 10 }}>
+                      <summary style={{ cursor: "pointer", fontSize: 11, color: "rgba(110,231,183,1)", fontWeight: 700 }}>
+                        {ui.sections.quickReadExpand || "Why this message + more questions"}
+                      </summary>
+                      <div style={{ marginTop: 10, fontSize: 11, color: "rgba(229,229,229,1)" }}>
+                        <div style={{ fontWeight: 800, marginBottom: 6 }}>{ui.sections.quickReadWhyTitle || "Why LEAF is saying this"}</div>
+                        <ul data-el="quickReadWhy" style={{ paddingLeft: 16, margin: 0 }} />
+                        <div style={{ height: 10 }} />
+                        <div style={{ fontWeight: 800, marginBottom: 6 }}>{ui.sections.quickReadMoreQuestionsTitle || "More questions (optional)"}</div>
+                        <ul data-el="quickReadQuestionsMore" style={{ paddingLeft: 16, margin: 0 }} />
+                      </div>
+                    </details>
+                  </div>
+                </section>
+
+                {/* INCENTIVES (REAL) */}
+                <details className="glass">
+                  <summary className="summaryRow">
+                    <div>
+                      <div className="h2">🏷️ Incentives & rebates</div>
+                      <div className="subText" style={{ marginTop: 4 }}>
+                        {p.incentives.length ? `${p.incentives.length} incentive${p.incentives.length === 1 ? "" : "s"} matched` : "No incentives matched"}
+                      </div>
+                    </div>
+                    <div className="summaryHint">{ui.sections.rangeDetailsTap || "Tap for details"}</div>
+                  </summary>
+
+                  <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+                    {p.incentives.length === 0 ? (
+                      <div className="subText">No incentives matched this upgrade. Check Incentives tags + this system type.</div>
+                    ) : (
+                      p.incentives.map((r: IncentiveResource) => {
+                        const amt = incentiveAmountText(r);
+                        return (
+                          <div key={(r as any).id || (r as any).programName} className="incentiveCard">
+                            <div className="incentiveTitle">
+                              {(r as any).programName}
+                              {amt ? <span style={{ fontWeight: 600, color: "rgba(229,229,229,1)" }}> — {amt}</span> : null}
+                            </div>
+                            {(r as any).shortBlurb ? <div className="incentiveBlurb">{(r as any).shortBlurb}</div> : null}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </details>
+
+                {/* DECISION */}
+                <section className="glass">
+                  <div className="rowBetween">
+                    <div className="h2">{ui.sections.decisionTitle || "🧠 Does this decision make sense?"}</div>
+                    <span className="badge" data-tone="good" data-el="decisionBadge">
+                      Likely yes ✅
+                    </span>
+                  </div>
+
+                  <div className="sliderBox" style={{ marginTop: 12 }}>
+                    <div style={{ fontWeight: 900, marginBottom: 6 }} data-el="decisionHeadline">
+                      This looks financially reasonable.
+                    </div>
+                    <div className="subText" style={{ marginTop: 0 }} data-el="decisionText">
+                      If the contractor quote lands within the LEAF range, this is typically a strong replacement decision.
+                    </div>
+
+                    <div style={{ height: 10 }} />
+
+                    <div className="rowBetween">
+                      <div className="smallLabel">Estimated net cost (after incentives)</div>
+                      <div className="priceText" data-el="msNetCostRange">
+                        $3,500–$4,500
+                      </div>
+                    </div>
+
+                    <div className="subText" style={{ marginTop: 8 }}>
+                      Estimated savings (at this price): <b data-el="msSavingsRange">$19–$35/mo</b>
+                    </div>
+
+                    <div style={{ height: 10 }} />
+
+                    <div className="rowBetween">
+                      <div className="smallLabel" style={{ color: "rgba(229,229,229,1)" }} data-el="msValueCheck">
+                        Within range ✅
+                      </div>
+                    </div>
+                    <div className="subText" style={{ marginTop: 6 }} data-el="msMeaning">
+                      Quotes in-range usually indicate predictable scope + fair pricing.
+                    </div>
+                  </div>
+                </section>
+              </main>
+            </div>
+          ))}
+        </div>
+
+        {/* CTA */}
+        <div className="ctaBar">
+          <div className="ctaInner">
+            <button className="ctaBtn" type="button">
+              {ui.buttons.ctaPrimary || "🔎 Get an exact bid from a contractor"}
+            </button>
+            <div className="ctaNote">{ui.ctaFooterText || "Compare the quote against your LEAF range"}</div>
+          </div>
+        </div>
       </div>
     </>
   );
