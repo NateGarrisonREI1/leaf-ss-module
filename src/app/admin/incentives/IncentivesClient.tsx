@@ -153,9 +153,7 @@ export default function IncentivesClient() {
   }
 
   function resetToDefaults() {
-    // Start from defaults for just this system type, but save as overrides so you can edit
     const defaults = INCENTIVE_LIBRARY.filter((r) => r.appliesTo.includes(selectedSystemKey)).map((x) => clone(x));
-    // remove existing overrides for this system and replace
     const kept = overrides.filter((r) => !r.appliesTo.includes(selectedSystemKey));
     setOverrides([...kept, ...defaults]);
   }
@@ -188,15 +186,20 @@ export default function IncentivesClient() {
     setOverrides((prev) => prev.filter((r) => r.id !== id));
   }
 
-  function addTagToRule(ruleId: string, tag: string) {
+  // ✅ Toggle behavior (click = add, click again = remove)
+  function toggleTagOnRule(ruleId: string, tag: string) {
     const t = normalizeTag(tag);
     if (!t) return;
+
     setOverrides((prev) =>
       prev.map((r) => {
         if (r.id !== ruleId) return r;
+
         const current = (r.tags ?? []).map(normalizeTag).filter(Boolean);
-        if (current.includes(t)) return r;
-        return { ...r, tags: [...current, t] };
+        const has = current.includes(t);
+
+        const nextTags = has ? current.filter((x) => x !== t) : [...current, t];
+        return { ...r, tags: nextTags };
       })
     );
   }
@@ -251,7 +254,6 @@ export default function IncentivesClient() {
         {systemOverrides.map((r) => {
           const amt = amountToString(r.amount);
 
-          // ✅ live match preview against catalog
           const matches = matchesCatalog(r, selectedSystemKey);
           const top3 = matches.slice(0, 3).map((x: any) => x.name);
           const extra = matches.length - top3.length;
@@ -316,7 +318,7 @@ export default function IncentivesClient() {
                     style={{ padding: 10, borderRadius: 10, border: "1px solid #e5e7eb" }}
                   />
 
-                  {/* ✅ Tag suggestion chips */}
+                  {/* ✅ Tag suggestion chips (toggle now) */}
                   {suggestions.length ? (
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       {suggestions.map((t) => {
@@ -325,8 +327,8 @@ export default function IncentivesClient() {
                           <button
                             key={t}
                             type="button"
-                            onClick={() => addTagToRule(r.id, t)}
-                            title="Click to add tag"
+                            onClick={() => toggleTagOnRule(r.id, t)}
+                            title={active ? "Click to remove tag" : "Click to add tag"}
                             style={{
                               padding: "6px 10px",
                               borderRadius: 999,
