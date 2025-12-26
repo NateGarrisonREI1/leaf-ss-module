@@ -154,9 +154,12 @@ export default function MockLeafReportPage() {
   const quoteBadge = getQuoteBadge(price, leaf.min, leaf.max);
 
   // Incentives (future-ready, editable rules)
-  const incentiveResources: IncentiveResource[] = active
-    ? getIncentivesForSystemType(active.existing.type, active.existing.subtype)
-    : [];
+ const incentiveResources: IncentiveResource[] = active
+  ? getIncentivesForSystemType(active.existing.type, {
+      tags: [active.existing.subtype].filter(Boolean),
+    })
+  : [];
+
 
   const existingTitle = active ? `${active.existing.type} — ${active.existing.subtype}` : "Existing";
   const suggestedTitle = active ? (active.suggested.name || "Suggested") : "Suggested";
