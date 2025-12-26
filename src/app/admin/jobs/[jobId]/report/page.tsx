@@ -166,11 +166,7 @@ export default function MockLeafReportPage() {
 
   // Incentives (future-ready, editable rules)
   // FIX: 2nd argument must be IncentiveContext, not a string.
-  const incentiveResources: IncentiveResource[] = active
-    ? getIncentivesForSystemType(active.existing.type, {
-        tags: [active.existing.subtype].filter(Boolean) as string[],
-      })
-    : [];
+  
 
   const existingTitle = active ? `${active.existing.type} — ${active.existing.subtype}` : "Existing";
   const suggestedTitle = active ? active.suggested.name || "Suggested" : "Suggested";
