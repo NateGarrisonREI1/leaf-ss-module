@@ -275,24 +275,27 @@ export default function JobPage() {
                 <div style={{ color: "#374151" }}>{pretty(maintenance)}</div>
 
                 <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                  <Link
-                    href={`/admin/jobs/${job.id}/snapshots/new?systemIndex=${idx}`}
-                    style={{
-                      textDecoration: "none",
-                      background: "#2563eb",
-                      color: "#fff",
-                      fontWeight: 900,
-                      padding: "10px 12px",
-                      borderRadius: 12,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      width: 150,
-                      textAlign: "center",
-                    }}
-                  >
-                    Create Snapshot
-                  </Link>
+                 <Link
+  href={`/admin/snapshots/new?jobId=${encodeURIComponent(job.id)}&systemId=${encodeURIComponent(
+    String(sys.id ?? `sys_${idx}`)
+  )}`}
+  style={{
+    textDecoration: "none",
+    background: "#2563eb",
+    color: "#fff",
+    fontWeight: 900,
+    padding: "10px 12px",
+    borderRadius: 12,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 150,
+    textAlign: "center",
+  }}
+>
+  Create Snapshot
+</Link>
+
                 </div>
               </div>
             );
