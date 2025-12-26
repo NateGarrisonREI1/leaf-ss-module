@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { MOCK_JOBS, type Job } from "../../_data/mockJobs";
-import { findLocalJob } from "../../_data/localJobs";
+import { findLocalJob, updateLocalJob } from "../../_data/localJobs";
+import Worksheet from "./_components/Worksheet";
 
 export default function JobDetailPage() {
   const params = useParams<{ jobId: string }>();
@@ -21,6 +22,11 @@ export default function JobDetailPage() {
     if (!jobId) return null;
     return localJob ?? MOCK_JOBS.find((j) => j.id === jobId) ?? null;
   }, [jobId, localJob]);
+
+  function handleJobUpdated(nextJob: Job) {
+    updateLocalJob(nextJob);
+    setLocalJob(nextJob);
+  }
 
   if (!jobId) {
     return (
@@ -108,20 +114,23 @@ export default function JobDetailPage() {
         </button>
       </div>
 
+      {/* Worksheet / Intake */}
+      <Worksheet job={job} onJobUpdated={handleJobUpdated} />
+
       {/* Existing Systems */}
       <div className="rei-card">
         <div style={{ fontWeight: 900, fontSize: 14, marginBottom: 10 }}>Existing Systems</div>
 
         {job.systems.length === 0 ? (
           <div style={{ color: "var(--muted)" }}>
-            No systems on this job yet. Next step: we’ll add the worksheet/intake panel here and create systems from it.
+            No systems on this job yet — add one in the worksheet above.
           </div>
         ) : (
           <div style={{ border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "1.1fr 1.4fr 0.7fr 0.7fr 0.9fr 1fr",
+                gridTemplateColumns: "1.1fr 1.4fr 0.7fr 0.7fr 0.9fr 0.9fr 1fr",
                 gap: 10,
                 padding: "12px 14px",
                 background: "rgba(16,24,40,.03)",
@@ -135,6 +144,7 @@ export default function JobDetailPage() {
               <div>Age</div>
               <div>Operational</div>
               <div>Wear</div>
+              <div>Maint.</div>
               <div />
             </div>
 
@@ -143,7 +153,7 @@ export default function JobDetailPage() {
                 key={s.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1.1fr 1.4fr 0.7fr 0.7fr 0.9fr 1fr",
+                  gridTemplateColumns: "1.1fr 1.4fr 0.7fr 0.7fr 0.9fr 0.9fr 1fr",
                   gap: 10,
                   padding: "12px 14px",
                   borderTop: "1px solid var(--border)",
@@ -155,11 +165,14 @@ export default function JobDetailPage() {
                 <div style={{ color: "var(--muted)" }}>{s.ageYears} yrs</div>
                 <div style={{ color: "var(--muted)" }}>{s.operational}</div>
                 <div style={{ color: "var(--muted)" }}>{s.wear}/5</div>
+                <div style={{ color: "var(--muted)" }}>{s.maintenance}</div>
 
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
                   <Link
                     className="rei-btn rei-btnPrimary"
-                    href={`/admin/snapshots/new?jobId=${encodeURIComponent(job.id)}&systemId=${encodeURIComponent(s.id)}`}
+                    href={`/admin/snapshots/new?jobId=${encodeURIComponent(job.id)}&systemId=${encodeURIComponent(
+                      s.id
+                    )}`}
                     style={{ textDecoration: "none" }}
                   >
                     Create Snapshot
@@ -169,6 +182,10 @@ export default function JobDetailPage() {
             ))}
           </div>
         )}
+
+        <div style={{ marginTop: 10, fontSize: 12, color: "var(--muted)" }}>
+          Next: the “Create Snapshot” button will load your LEAF System Snapshot UI using this system’s worksheet data.
+        </div>
       </div>
     </div>
   );
