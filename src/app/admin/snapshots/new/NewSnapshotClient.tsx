@@ -11,11 +11,18 @@ import { upsertLocalSnapshot, type SnapshotDraft } from "../../_data/localSnapsh
 // ✅ Your catalog file:
 import * as CatalogModule from "../../_data/mockSystems";
 
+// ✅ Incentives rules (NO routing / reports touched)
+import {
+  getIncentivesForSystemType,
+  INCENTIVE_COPY,
+  type IncentiveResource,
+  type IncentiveAmount,
+} from "../../../../lib/incentives/incentiveRules";
+
 type CatalogItem = {
   id: string;
   name: string;
 
-  // optional descriptive fields
   replaces?: string;
   benefits?: string;
 
@@ -133,7 +140,7 @@ function normalizeCatalog(raw: any[]): CatalogItem[] {
         x.oneLiner ??
         undefined;
 
-      // ✅ FIX: support your real schema: defaultAssumptions.estCost / estAnnualSavings / estPaybackYears
+      // ✅ support your real schema: defaultAssumptions.estCost / estAnnualSavings / estPaybackYears
       const da = x.defaultAssumptions ?? {};
 
       const defaultCost = firstNumber(
@@ -202,6 +209,83 @@ function normalizeCatalog(raw: any[]): CatalogItem[] {
     .filter((c: CatalogItem) => !!c?.id && !!c?.name);
 }
 
+function formatAmount(amount?: IncentiveAmount): string {
+  if (!amount) return "";
+  if (amount.kind === "text") return amount.value;
+  if (amount.kind === "flat") {
+    const unit = amount.unit ? ` (${amount.unit})` : "";
+    return `$${amount.value}${unit}`;
+  }
+  if (amount.kind === "range") {
+    const unit = amount.unit ? ` (${amount.unit})` : "";
+    return `$${amount.min}–$${amount.max}${unit}`;
+  }
+  return "";
+}
+
+function sumNumericIncentives(items: IncentiveResource[]): { min: number; max: number } | null {
+  let min = 0;
+  let max = 0;
+  let any = false;
+
+  for (const r of items) {
+    const a = r.amount;
+    if (!a) continue;
+    if (a.kind === "flat" && a.unit !== "percent") {
+      min += a.value;
+      max += a.value;
+      any = true;
+    }
+    if (a.kind === "range" && a.unit !== "percent") {
+      min += a.min;
+      max += a.max;
+      any = true;
+    }
+  }
+
+  return any ? { min, max } : null;
+}
+
+function buildIncentivesNotesBlock(selected: IncentiveResource[]) {
+  if (!selected.length) return "";
+
+  const disclaimer = INCENTIVE_COPY.find((x) => x.key === "general_disclaimer")?.body ?? "";
+  const fedBlurb = INCENTIVE_COPY.find((x) => x.key === "federal_tax_credit_blurb")?.body ?? "";
+  const utilBlurb = INCENTIVE_COPY.find((x) => x.key === "utility_rebate_blurb")?.body ?? "";
+
+  const lines: string[] = [];
+  lines.push("Incentives (auto-added)");
+  lines.push("");
+
+  if (disclaimer) {
+    lines.push(disclaimer);
+    lines.push("");
+  }
+
+  // small helper blurbs (kept short)
+  if (fedBlurb) {
+    lines.push(`• ${fedBlurb}`);
+  }
+  if (utilBlurb) {
+    lines.push(`• ${utilBlurb}`);
+  }
+  lines.push("");
+
+  for (const r of selected) {
+    const amt = formatAmount(r.amount);
+    const head = `${r.programName}${amt ? ` — ${amt}` : ""}`;
+    lines.push(`- ${head}`);
+    if (r.shortBlurb) lines.push(`  ${r.shortBlurb}`);
+    if (r.links?.length) {
+      for (const l of r.links) {
+        lines.push(`  Link: ${l.label} — ${l.url}`);
+      }
+    }
+  }
+
+  return lines.join("\n").trim();
+}
+
 export default function NewSnapshotClient({
   jobId,
   systemId,
@@ -235,6 +319,41 @@ export default function NewSnapshotClient({
     return catalog.find((c) => c.id === catalogId) ?? null;
   }, [catalogId, catalog]);
 
+  // ---------------- Incentives integration (same page / same "backend") ----------------
+  const incentives: IncentiveResource[] = useMemo(() => {
+    if (!existingSystem) return [];
+    const tags: string[] = [
+      existingSystem.subtype,
+      existingSystem.fuel,
+      existingSystem.type,
+    ]
+      .map((x: any) => String(x || "").trim())
+      .filter(Boolean);
+
+    return getIncentivesForSystemType(existingSystem.type || "", { tags });
+  }, [existingSystem]);
+
+  // default: include everything we find
+  const [includeIncentivesInNotes, setIncludeIncentivesInNotes] = useState(true);
+  const [selectedIncentiveIds, setSelectedIncentiveIds] = useState<string[]>(() => []);
+
+  // initialize selection once incentives load
+  useMemo(() => {
+    if (!incentives.length) return;
+    // only auto-set if user hasn't touched yet
+    if (selectedIncentiveIds.length === 0) {
+      setSelectedIncentiveIds(incentives.map((x) => x.id));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incentives]);
+
+  const selectedIncentives = useMemo(() => {
+    const set = new Set(selectedIncentiveIds);
+    return incentives.filter((x) => set.has(x.id));
+  }, [incentives, selectedIncentiveIds]);
+
+  const incentiveSum = useMemo(() => sumNumericIncentives(selectedIncentives), [selectedIncentives]);
+
   // Form state
   const [suggestedName, setSuggestedName] = useState("");
   const [estCost, setEstCost] = useState<string>("");
@@ -254,10 +373,10 @@ export default function NewSnapshotClient({
   function applyCatalogDefaults() {
     if (!selectedCatalog) return;
 
-    // name: only fill if blank (so user can type custom)
+    // name: only fill if blank
     setSuggestedName((prev) => (prev.trim() ? prev : selectedCatalog.name));
 
-    // ✅ numeric fields: OVERWRITE so it’s obvious it worked
+    // overwrite numeric fields so it’s obvious
     setEstCost(
       selectedCatalog.defaultCost !== null && selectedCatalog.defaultCost !== undefined
         ? String(selectedCatalog.defaultCost)
@@ -274,7 +393,7 @@ export default function NewSnapshotClient({
         : ""
     );
 
-    // notes: append catalog notes if present
+    // append catalog notes if present
     setNotes((prev) => {
       const base = prev.trim();
       const catNotes = selectedCatalog.defaultNotes?.trim() ?? "";
@@ -292,6 +411,19 @@ export default function NewSnapshotClient({
       alert("Suggested system name is required.");
       return;
     }
+
+    const userNotes = notes.trim();
+
+    // ✅ "backend stuff" happens right here, on create
+    const incentivesBlock =
+      includeIncentivesInNotes && selectedIncentives.length
+        ? buildIncentivesNotesBlock(selectedIncentives)
+        : "";
+
+    const finalNotes =
+      incentivesBlock && userNotes
+        ? `${userNotes}\n\n---\n\n${incentivesBlock}`
+        : incentivesBlock || userNotes;
 
     const draft: SnapshotDraft = {
       id: `snap_${Math.random().toString(16).slice(2)}_${Date.now()}`,
@@ -315,7 +447,7 @@ export default function NewSnapshotClient({
         estCost: parseNum(estCost),
         estAnnualSavings: parseNum(estAnnualSavings),
         estPaybackYears: parseNum(estPaybackYears),
-        notes: notes.trim(),
+        notes: finalNotes,
       },
     };
 
@@ -462,6 +594,79 @@ export default function NewSnapshotClient({
             ) : (
               <div style={{ color: "var(--muted)", fontSize: 12 }}>
                 Catalog numbers are starting assumptions. You can override everything below.
+              </div>
+            )}
+          </div>
+
+          {/* ✅ Incentives section */}
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 14, padding: 12, background: "white" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ fontWeight: 900 }}>Incentives (auto)</div>
+
+              <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700 }}>
+                <input
+                  type="checkbox"
+                  checked={includeIncentivesInNotes}
+                  onChange={(e) => setIncludeIncentivesInNotes(e.target.checked)}
+                />
+                Include incentives in snapshot notes on save
+              </label>
+            </div>
+
+            {incentives.length ? (
+              <>
+                <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 6 }}>
+                  Pulled from incentives rules for: <b>{existingSystem.type}</b>
+                  {incentiveSum ? (
+                    <> • Est. numeric rebates: <b>${incentiveSum.min}–${incentiveSum.max}</b></>
+                  ) : null}
+                </div>
+
+                <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+                  {incentives.map((r) => {
+                    const checked = selectedIncentiveIds.includes(r.id);
+                    const amt = formatAmount(r.amount);
+                    return (
+                      <label
+                        key={r.id}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "20px 1fr",
+                          gap: 10,
+                          alignItems: "start",
+                          padding: 10,
+                          borderRadius: 12,
+                          border: "1px solid #eef2f7",
+                          background: "#fafafa",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            const next = new Set(selectedIncentiveIds);
+                            if (e.target.checked) next.add(r.id);
+                            else next.delete(r.id);
+                            setSelectedIncentiveIds(Array.from(next));
+                          }}
+                          style={{ marginTop: 2 }}
+                        />
+                        <div>
+                          <div style={{ fontWeight: 900 }}>
+                            {r.programName}
+                            {amt ? <span style={{ fontWeight: 700, color: "#374151" }}> — {amt}</span> : null}
+                          </div>
+                          <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>{r.shortBlurb}</div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 6 }}>
+                No incentive rules matched this system type yet. Add rules in{" "}
+                <code>src/lib/incentives/incentiveRules.ts</code>.
               </div>
             )}
           </div>
