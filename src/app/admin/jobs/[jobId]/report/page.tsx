@@ -9,9 +9,13 @@ import { findLocalJob } from "../../../_data/localJobs";
 import { loadLocalSnapshots, snapshotsForJob, type SnapshotDraft } from "../../../_data/localSnapshots";
 
 // OPTIONAL (future-ready incentives rules)
-// If you don’t want this yet, you can delete this import and the Incentives section below.
 // Path from: src/app/admin/jobs/[jobId]/report/page.tsx -> src/lib/incentives/incentiveRules.ts
-import { getIncentivesForSystemType, type IncentiveResource } from "../../../../../lib/incentives/incentiveRules";
+import {
+  getIncentivesForSystemType,
+  type IncentiveResource,
+  type IncentiveAmount,
+  type IncentiveLink,
+} from "../../../../../lib/incentives/incentiveRules";
 
 function formatMoney(n: number | null | undefined) {
   if (n === null || n === undefined) return "—";
@@ -26,6 +30,35 @@ function formatDate(iso: string) {
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
+}
+
+function formatIncentiveAmount(amount?: IncentiveAmount): string | null {
+  if (!amount) return null;
+
+  if (amount.kind === "text") return amount.value;
+
+  const unit = amount.unit;
+  const unitLabel =
+    unit === "percent" ? "%" : unit === "per_year" ? "/yr" : unit === "one_time" ? " one-time" : "";
+
+  if (amount.kind === "flat") {
+    if (unit === "percent") return `${amount.value}${unitLabel}`;
+    return `$${Math.round(amount.value).toLocaleString("en-US")}${unitLabel}`;
+  }
+
+  // range
+  if (unit === "percent") return `${amount.min}–${amount.max}${unitLabel}`;
+  return `$${Math.round(amount.min).toLocaleString("en-US")}–$${Math.round(amount.max).toLocaleString("en-US")}${unitLabel}`;
+}
+
+function badgeStyle(tone: "good" | "warn" | "bad" | "neutral"): CSSProperties {
+  const map: Record<string, CSSProperties> = {
+    good: { background: "rgba(16,185,129,.14)", border: "1px solid rgba(16,185,129,.35)", color: "#a7f3d0" },
+    warn: { background: "rgba(234,179,8,.14)", border: "1px solid rgba(234,179,8,.35)", color: "#fde68a" },
+    bad: { background: "rgba(239,68,68,.14)", border: "1px solid rgba(239,68,68,.35)", color: "#fecaca" },
+    neutral: { background: "rgba(255,255,255,.08)", border: "1px solid rgba(255,255,255,.12)", color: "rgba(255,255,255,.86)" },
+  };
+  return map[tone] ?? map.neutral;
 }
 
 export default function MockLeafReportPage() {
@@ -58,10 +91,7 @@ export default function MockLeafReportPage() {
   }
 
   // Simple “LEAF-style” default ranges for now (mock)
-  // Later this will come from your snapshot math / catalog rules.
   function getLeafRangeFor(snap: SnapshotDraft) {
-    // You can adjust these per system type later.
-    // For now: HVAC is pricier than Doors, etc.
     const t = (snap.existing.type || "").toLowerCase();
     if (t.includes("hvac")) return { min: 5000, max: 7000 };
     if (t.includes("water")) return { min: 1800, max: 3800 };
@@ -72,7 +102,6 @@ export default function MockLeafReportPage() {
   }
 
   function getSavingsRangeFor(price: number, leafMin: number, leafMax: number) {
-    // mock: base savings range, bumps slightly as price goes up above max
     const baseMin = 19;
     const baseMax = 35;
 
@@ -92,20 +121,6 @@ export default function MockLeafReportPage() {
     if (price > overPriced) return { tone: "bad" as const, text: "Overpriced" };
     if (price > leafMax) return { tone: "warn" as const, text: "Likely overpriced" };
     return { tone: "good" as const, text: "Within range" };
-  }
-
-  function badgeStyle(tone: "good" | "warn" | "bad" | "neutral") {
-    const map: Record<string, CSSProperties> = {
-      good: { background: "rgba(16,185,129,.14)", border: "1px solid rgba(16,185,129,.35)", color: "#a7f3d0" },
-      warn: { background: "rgba(234,179,8,.14)", border: "1px solid rgba(234,179,8,.35)", color: "#fde68a" },
-      bad: { background: "rgba(239,68,68,.14)", border: "1px solid rgba(239,68,68,.35)", color: "#fecaca" },
-      neutral: {
-        background: "rgba(255,255,255,.08)",
-        border: "1px solid rgba(255,255,255,.12)",
-        color: "rgba(255,255,255,.86)",
-      },
-    };
-    return map[tone] ?? map.neutral;
   }
 
   if (!job) {
@@ -155,9 +170,10 @@ export default function MockLeafReportPage() {
   const quoteBadge = getQuoteBadge(price, leaf.min, leaf.max);
 
   // Incentives (future-ready, editable rules)
+  // FIX: 2nd argument must be IncentiveContext, not a string.
   const incentiveResources: IncentiveResource[] = active
     ? getIncentivesForSystemType(active.existing.type, {
-        tags: [active.existing.subtype].filter((v): v is string => Boolean(v)),
+        tags: [active.existing.subtype].filter(Boolean) as string[],
       })
     : [];
 
@@ -183,12 +199,7 @@ export default function MockLeafReportPage() {
             <Link
               href={`/admin/jobs/${job.id}`}
               className="rei-btn"
-              style={{
-                textDecoration: "none",
-                color: "inherit",
-                background: "rgba(255,255,255,.08)",
-                borderColor: "rgba(255,255,255,.12)",
-              }}
+              style={{ textDecoration: "none", color: "inherit", background: "rgba(255,255,255,.08)", borderColor: "rgba(255,255,255,.12)" }}
             >
               ← Back
             </Link>
@@ -287,14 +298,7 @@ export default function MockLeafReportPage() {
       <div className="rei-card" style={{ background: "black", color: "white", border: "1px solid rgba(255,255,255,.12)" }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           {/* Existing */}
-          <div
-            style={{
-              border: "1px solid rgba(239,68,68,.25)",
-              borderRadius: 16,
-              padding: 14,
-              background: "rgba(255,255,255,.04)",
-            }}
-          >
+          <div style={{ border: "1px solid rgba(239,68,68,.25)", borderRadius: 16, padding: 14, background: "rgba(255,255,255,.04)" }}>
             <div style={{ fontWeight: 900, marginBottom: 8 }}>📷 Current system</div>
 
             <div style={{ fontWeight: 900 }}>{existingTitle}</div>
@@ -312,14 +316,7 @@ export default function MockLeafReportPage() {
           </div>
 
           {/* Suggested */}
-          <div
-            style={{
-              border: "1px solid rgba(67,164,25,.35)",
-              borderRadius: 16,
-              padding: 14,
-              background: "rgba(255,255,255,.04)",
-            }}
-          >
+          <div style={{ border: "1px solid rgba(67,164,25,.35)", borderRadius: 16, padding: 14, background: "rgba(255,255,255,.04)" }}>
             <div style={{ fontWeight: 900, marginBottom: 8 }}>✨ Recommended upgrade</div>
 
             <div style={{ fontWeight: 900 }}>{suggestedTitle}</div>
@@ -409,44 +406,52 @@ export default function MockLeafReportPage() {
           </div>
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
-            {incentiveResources.map((r) => (
-              <div
-                key={r.id}
-                style={{
-                  border: "1px solid rgba(255,255,255,.12)",
-                  borderRadius: 14,
-                  padding: 12,
-                  background: "rgba(255,255,255,.04)",
-                }}
-              >
-                <div style={{ fontWeight: 900 }}>{r.title}</div>
-                <div style={{ opacity: 0.75, fontSize: 12, marginTop: 4 }}>{r.description}</div>
+            {incentiveResources.map((r) => {
+              const amountLabel = formatIncentiveAmount(r.amount);
+              return (
+                <div
+                  key={r.id}
+                  style={{
+                    border: "1px solid rgba(255,255,255,.12)",
+                    borderRadius: 14,
+                    padding: 12,
+                    background: "rgba(255,255,255,.04)",
+                  }}
+                >
+                  <div style={{ fontWeight: 900 }}>{r.programName}</div>
+                  <div style={{ opacity: 0.75, fontSize: 12, marginTop: 4 }}>{r.shortBlurb}</div>
 
-                <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  {r.typicalRange ? (
-                    <span style={{ padding: "6px 10px", borderRadius: 999, ...badgeStyle("neutral"), fontSize: 12 }}>
-                      Typical: {r.typicalRange}
-                    </span>
+                  {r.details ? (
+                    <div style={{ opacity: 0.7, fontSize: 12, marginTop: 8 }}>{r.details}</div>
                   ) : null}
 
-                  {r.linkLabel && r.href ? (
-                    <a
-                      href={r.href}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{ color: "#86efac", textDecoration: "underline", fontSize: 12 }}
-                    >
-                      {r.linkLabel}
-                    </a>
-                  ) : null}
+                  <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    {amountLabel ? (
+                      <span style={{ padding: "6px 10px", borderRadius: 999, ...badgeStyle("neutral"), fontSize: 12 }}>
+                        Amount: {amountLabel}
+                      </span>
+                    ) : null}
+
+                    {(r.links || []).map((lnk: IncentiveLink, idx: number) => (
+                      <a
+                        key={`${r.id}-link-${idx}`}
+                        href={lnk.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ color: "#86efac", textDecoration: "underline", fontSize: 12 }}
+                      >
+                        {lnk.label}
+                      </a>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
         <div style={{ marginTop: 12, fontSize: 11, opacity: 0.65 }}>
-          To edit wording / links / ranges: open <code>src/lib/incentives/incentiveRules.ts</code>
+          To edit wording / links / amounts: open <code>src/lib/incentives/incentiveRules.ts</code>
         </div>
       </div>
     </div>
