@@ -14,6 +14,10 @@ const ITEMS: Item[] = [
   { href: "/admin/customers", label: "Customers", icon: "👤" },
   { href: "/admin/jobs", label: "Jobs", icon: "🧾" },
   { href: "/admin/snapshots", label: "LEAF System Snapshots", icon: "🧩" },
+
+  // ✅ NEW: Master configuration
+  { href: "/admin/leaf-ss-config", label: "LEAF SS Config", icon: "⚙️" },
+
   { href: "/admin/systems", label: "Systems Catalog", icon: "🧰" },
   { href: "/admin/incentives", label: "Incentives", icon: "🏷️" },
 ];
