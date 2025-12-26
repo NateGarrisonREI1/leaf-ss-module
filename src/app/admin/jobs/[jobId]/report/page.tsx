@@ -10,12 +10,7 @@ import { loadLocalSnapshots, snapshotsForJob, type SnapshotDraft } from "../../.
 
 // OPTIONAL (future-ready incentives rules)
 // Path from: src/app/admin/jobs/[jobId]/report/page.tsx -> src/lib/incentives/incentiveRules.ts
-import {
-  getIncentivesForSystemType,
-  type IncentiveResource,
-  type IncentiveAmount,
-  type IncentiveLink,
-} from "../../../../../lib/incentives/incentiveRules";
+
 
 function formatMoney(n: number | null | undefined) {
   if (n === null || n === undefined) return "—";
