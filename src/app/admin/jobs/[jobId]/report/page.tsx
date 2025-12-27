@@ -81,34 +81,45 @@ function getEffectiveLeafConfig() {
 ───────────────────────────────────────────── */
 
 export default function JobReportPage() {
- const params = useParams();
-const jobId = useMemo(() => {
-  const raw = (params as any)?.jobId;
-  return Array.isArray(raw) ? raw[0] : raw;
-}, [params]);
+  const params = useParams();
 
-const job: Job | null = useMemo(() => {
-  if (!jobId) return null;
+  const jobId = useMemo(() => {
+    const raw = (params as any)?.jobId;
+    return Array.isArray(raw) ? raw[0] : raw;
+  }, [params]);
 
-  // IMPORTANT: ensure localStorage cache is loaded before searching
-  try {
-    loadLocalJobs();
-  } catch {}
+  // Load caches once (NOT inside useMemo)
+  useEffect(() => {
+    try {
+      loadLocalJobs();
+      loadLocalSnapshots();
+    } catch {}
+  }, []);
 
-  // 1) local job first
-  const local = findLocalJob(jobId);
-  if (local) return local;
+  // force a rerender after mount so localStorage-loaded data is visible
+  const [ready, setReady] = useState(false);
+  useEffect(() => setReady(true), []);
 
-  // 2) exact mock match
-  const mock = MOCK_JOBS.find((j) => j.id === jobId);
-  if (mock) return mock;
+  const job: Job | null = useMemo(() => {
+    if (!jobId) return null;
 
-  // 3) if someone navigates with "1001" instead of "job_1001"
-  const mock2 = MOCK_JOBS.find((j) => j.id === `job_${jobId}`);
-  if (mock2) return mock2;
+    // local job first
+    const local = findLocalJob(jobId);
+    if (local) return local;
 
-  return null;
-}, [jobId]);
+    // fallback mock
+    return (
+      MOCK_JOBS.find((j) => j.id === jobId) ||
+      MOCK_JOBS.find((j) => j.id === `job_${jobId}`) ||
+      null
+    );
+  }, [jobId, ready]);
+
+  const snaps = useMemo(() => {
+    if (!jobId) return [];
+    return snapshotsForJob(jobId);
+  }, [jobId, ready]);
+
 
 
   const pages = useMemo(() => {
