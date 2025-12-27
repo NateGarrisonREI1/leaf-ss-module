@@ -1,17 +1,20 @@
 "use client";
 
-function makeSnapshotId(systemId: string) {
-  const rand = Math.floor(Math.random() * 900000) + 100000;
-  return `snap_${systemId}_${rand}`;
-}
-
 import { useEffect, useMemo, useState } from "react";
+
 import {
   type SnapshotDraft,
   upsertLocalSnapshot,
 } from "../../../_data/localSnapshots";
+
 import { MOCK_SYSTEMS, type CatalogSystem } from "../../../_data/mockSystems";
+import { listCatalogSystems } from "../../../_data/catalogStore";
 import { calculateLeafSavings, type LeafTierKey } from "../../../_data/leafSSConfigRuntime";
+
+function makeSnapshotId(systemId: string) {
+  const rand = Math.floor(Math.random() * 900000) + 100000;
+  return `snap_${systemId}_${rand}`;
+}
 
 /* ─────────────────────────────────────────────
    TYPES
@@ -33,58 +36,24 @@ type Props = {
   onSaved: () => void;
 };
 
-/* ─────────────────────────────────────────────
-   HELPERS
-───────────────────────────────────────────── */
+type TierOverride = NonNullable<
+  NonNullable<SnapshotDraft["suggested"]["leafSSOverrides"]>["tiers"]
+>[LeafTierKey];
 
-function numOrNull(v: string): number | null {
-  if (v === "") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-function clamp01(n: number) {
-  return Math.max(0, Math.min(1, n));
-}
-
-type TierOverride = {
-  leafPriceRange?: { min?: number; max?: number };
-  baseMonthlySavings?: { min?: number; max?: number };
-  recommendedName?: string;
-  statusPillText?: string;
-};
-
-function getTierBlock(s: SnapshotDraft, tier: LeafTierKey): TierOverride {
-  const tiers = s.suggested.leafSSOverrides?.tiers || {};
-  return (tiers as Partial<Record<LeafTierKey, TierOverride>>)[tier] || {};
-}
-
-function setTierBlock(
-  s: SnapshotDraft,
-  tier: LeafTierKey,
-  patch: Partial<TierOverride>
-): SnapshotDraft {
-  const prev = s.suggested.leafSSOverrides?.tiers || {};
-  const prevTyped = prev as Partial<Record<LeafTierKey, TierOverride>>;
-
+function mapRuntimeToSnapshot(result: ReturnType<typeof calculateLeafSavings>) {
   return {
-    ...s,
-    suggested: {
-      ...s.suggested,
-      leafSSOverrides: {
-        ...(s.suggested.leafSSOverrides || {}),
-        tiers: {
-          ...prevTyped,
-          [tier]: {
-            ...(prevTyped[tier] || {}),
-            ...patch,
-          },
-        },
-      },
-    },
+    currentWaste: result.currentWaste,
+    recoverableWaste: result.recoverableWaste,
+
+    minAnnual: result.minAnnualSavings,
+    maxAnnual: result.maxAnnualSavings,
+    centerAnnual: result.annualSavingsCenter,
+
+    minMonthly: result.minMonthlySavings,
+    maxMonthly: result.maxMonthlySavings,
+    centerMonthly: result.centerMonthlySavings,
   };
 }
-
 
 /* ─────────────────────────────────────────────
    COMPONENT
@@ -115,7 +84,7 @@ export default function SnapshotEditor({
         wear: existingSystem.wear ?? null,
         maintenance: existingSystem.maintenance,
 
-        // builder-editable defaults (blank is fine)
+        // report-facing optional fields start empty (user edits here)
         label: "",
         statusPillText: "",
         annualCostRange: { min: 0, max: 0 },
@@ -127,31 +96,25 @@ export default function SnapshotEditor({
         catalogSystemId: null,
         name: "",
         estCost: null,
+
+        // legacy fields kept for now but NOT used as fixed report data
         estAnnualSavings: null,
         estPaybackYears: null,
+
         notes: "",
         tier: "better",
 
-        recommendedNameByTier: {
-          good: "",
-          better: "",
-          best: "",
-        },
-        statusPillTextByTier: {
-          good: "",
-          better: "",
-          best: "",
-        },
+        recommendedNameByTier: {},
+        statusPillTextByTier: {},
         imageUrl: "",
-        leafSSOverrides: {
-          tiers: {},
-        },
+
+        leafSSOverrides: { tiers: {} },
       },
 
       calculationInputs: {
-        annualUtilitySpend: undefined,
-        systemShare: undefined,
-        expectedLife: undefined,
+        annualUtilitySpend: 2400,
+        systemShare: 0.4,
+        expectedLife: 20,
         partialFailure: false,
       },
 
@@ -160,124 +123,119 @@ export default function SnapshotEditor({
     };
   });
 
-  const [calcPreview, setCalcPreview] = useState<SnapshotDraft["calculatedSavings"] | null>(
-    working.calculatedSavings || null
-  );
-
-  const catalogSystems = useMemo(() => MOCK_SYSTEMS, []);
-  const selectedCatalog: CatalogSystem | null = useMemo(() => {
-    if (!working.suggested.catalogSystemId) return null;
-    return catalogSystems.find((s) => s.id === working.suggested.catalogSystemId) || null;
-  }, [working.suggested.catalogSystemId, catalogSystems]);
-
   /* ─────────────────────────────────────────────
-     EFFECTS: seed from catalog system selection
+     CATALOG (local editable store)
   ────────────────────────────────────────────── */
 
+  const catalogSystems = useMemo(() => listCatalogSystems(MOCK_SYSTEMS), []);
+  const selectedCatalog: CatalogSystem | null = useMemo(() => {
+    if (!working.suggested.catalogSystemId) return null;
+    return (
+      catalogSystems.find((s) => s.id === working.suggested.catalogSystemId) ||
+      null
+    );
+  }, [working.suggested.catalogSystemId, catalogSystems]);
+
+  // Auto-fill suggested base name when catalog changes
   useEffect(() => {
     if (!selectedCatalog) return;
-
-    setWorking((w) => {
-      const next: SnapshotDraft = {
-        ...w,
-        suggested: {
-          ...w.suggested,
-          name: selectedCatalog.name,
-
-          // If the catalog has overrides, treat them as *inputs* copied into the snapshot
-          leafSSOverrides: selectedCatalog.leafSSOverrides
-            ? JSON.parse(JSON.stringify(selectedCatalog.leafSSOverrides))
-            : w.suggested.leafSSOverrides,
-        },
-        updatedAt: new Date().toISOString(),
-      };
-
-      // Seed recommended/status-by-tier if the catalog includes those overrides
-      const tiers = selectedCatalog.leafSSOverrides?.tiers || {};
-      (["good", "better", "best"] as LeafTierKey[]).forEach((t) => {
-        const recName = tiers[t]?.recommendedName;
-        const pill = tiers[t]?.statusPillText;
-
-        if (recName && !next.suggested.recommendedNameByTier?.[t]) {
-          next.suggested.recommendedNameByTier = {
-            ...(next.suggested.recommendedNameByTier || {}),
-            [t]: recName,
-          };
-        }
-        if (pill && !next.suggested.statusPillTextByTier?.[t]) {
-          next.suggested.statusPillTextByTier = {
-            ...(next.suggested.statusPillTextByTier || {}),
-            [t]: pill,
-          };
-        }
-      });
-
-      return next;
-    });
+    setWorking((w) => ({
+      ...w,
+      suggested: {
+        ...w.suggested,
+        name: w.suggested.name?.trim() ? w.suggested.name : selectedCatalog.name,
+      },
+      updatedAt: new Date().toISOString(),
+    }));
   }, [selectedCatalog]);
 
   /* ─────────────────────────────────────────────
      UPDATE HELPERS
   ────────────────────────────────────────────── */
 
-  function touch(next: SnapshotDraft) {
-    next.updatedAt = new Date().toISOString();
-    return next;
-  }
-
   function updateExisting<K extends keyof SnapshotDraft["existing"]>(
     key: K,
     value: SnapshotDraft["existing"][K]
   ) {
-    setWorking((w) =>
-      touch({
-        ...w,
-        existing: { ...w.existing, [key]: value },
-      })
-    );
+    setWorking((w) => ({
+      ...w,
+      existing: { ...w.existing, [key]: value },
+      updatedAt: new Date().toISOString(),
+    }));
   }
 
   function updateSuggested<K extends keyof SnapshotDraft["suggested"]>(
     key: K,
     value: SnapshotDraft["suggested"][K]
   ) {
-    setWorking((w) =>
-      touch({
-        ...w,
-        suggested: { ...w.suggested, [key]: value },
-      })
-    );
+    setWorking((w) => ({
+      ...w,
+      suggested: { ...w.suggested, [key]: value },
+      updatedAt: new Date().toISOString(),
+    }));
   }
 
   function updateCalc<K extends keyof NonNullable<SnapshotDraft["calculationInputs"]>>(
     key: K,
     value: NonNullable<SnapshotDraft["calculationInputs"]>[K]
   ) {
-    setWorking((w) =>
-      touch({
-        ...w,
-        calculationInputs: { ...(w.calculationInputs || {}), [key]: value },
-      })
-    );
+    setWorking((w) => ({
+      ...w,
+      calculationInputs: {
+        ...(w.calculationInputs || {}),
+        [key]: value,
+      },
+      updatedAt: new Date().toISOString(),
+    }));
+  }
+
+  function patchTierOverride(
+    s: SnapshotDraft,
+    tier: LeafTierKey,
+    patch: Partial<TierOverride>
+  ): SnapshotDraft {
+    const prevTiers = s.suggested.leafSSOverrides?.tiers || {};
+    const prevTier = prevTiers[tier] || {};
+    return {
+      ...s,
+      suggested: {
+        ...s.suggested,
+        leafSSOverrides: {
+          ...(s.suggested.leafSSOverrides || {}),
+          tiers: {
+            ...prevTiers,
+            [tier]: { ...prevTier, ...patch },
+          },
+        },
+      },
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function updateTierOverride(
+    tier: LeafTierKey,
+    patch: Partial<TierOverride>
+  ) {
+    setWorking((w) => patchTierOverride(w, tier, patch));
   }
 
   /* ─────────────────────────────────────────────
-     CALCULATIONS
+     LIVE CALC PREVIEW (no fixed report numbers)
   ────────────────────────────────────────────── */
 
-  function runCalculations() {
+  const calcPreview = useMemo(() => {
     const tier = working.suggested.tier;
-    if (!tier) return;
+    if (!tier) return null;
+
+    const annualUtilitySpend = working.calculationInputs?.annualUtilitySpend ?? 2400;
+    const systemShare = working.calculationInputs?.systemShare ?? 0.4;
+    const expectedLife = working.calculationInputs?.expectedLife ?? 20;
+    const partialFailure = working.calculationInputs?.partialFailure;
 
     const wear = working.existing.wear ?? 3;
     const age = working.existing.ageYears ?? 10;
 
-    const annualUtilitySpend = working.calculationInputs?.annualUtilitySpend ?? 2400;
-    const systemShare = clamp01(working.calculationInputs?.systemShare ?? 0.4);
-    const expectedLife = working.calculationInputs?.expectedLife ?? 20;
-    const partialFailure = Boolean(working.calculationInputs?.partialFailure);
-
-    const res = calculateLeafSavings({
+    const result = calculateLeafSavings({
       wear,
       age,
       tier,
@@ -287,44 +245,24 @@ export default function SnapshotEditor({
       partialFailure,
     });
 
-    setCalcPreview({
-      currentWaste: res.currentWaste,
-      recoverableWaste: res.recoverableWaste,
-      minAnnual: res.minAnnualSavings,
-      maxAnnual: res.maxAnnualSavings,
-      centerAnnual: res.annualSavingsCenter,
-      minMonthly: res.minMonthlySavings,
-      maxMonthly: res.maxMonthlySavings,
-      centerMonthly: res.centerMonthlySavings,
-    });
-
-    // also store it into working (so save persists what you just ran)
-    setWorking((w) =>
-      touch({
-        ...w,
-        calculatedSavings: {
-          currentWaste: res.currentWaste,
-          recoverableWaste: res.recoverableWaste,
-          minAnnual: res.minAnnualSavings,
-          maxAnnual: res.maxAnnualSavings,
-          centerAnnual: res.annualSavingsCenter,
-          minMonthly: res.minMonthlySavings,
-          maxMonthly: res.maxMonthlySavings,
-          centerMonthly: res.centerMonthlySavings,
-        },
-      })
-    );
-  }
+    return mapRuntimeToSnapshot(result);
+  }, [
+    working.suggested.tier,
+    working.calculationInputs?.annualUtilitySpend,
+    working.calculationInputs?.systemShare,
+    working.calculationInputs?.expectedLife,
+    working.calculationInputs?.partialFailure,
+    working.existing.wear,
+    working.existing.ageYears,
+  ]);
 
   function handleSave() {
-    // force a calc pass before saving if possible
-    runCalculations();
     upsertLocalSnapshot(working);
     onSaved();
   }
 
   const tier: LeafTierKey = (working.suggested.tier || "better") as LeafTierKey;
-  const tierBlock = getTierBlock(working, tier);
+  const tierOverride = working.suggested.leafSSOverrides?.tiers?.[tier] || {};
 
   /* ─────────────────────────────────────────────
      RENDER
@@ -333,107 +271,15 @@ export default function SnapshotEditor({
   return (
     <div className="rei-card" style={{ marginTop: 16 }}>
       <div style={{ fontWeight: 900, fontSize: 14, marginBottom: 6 }}>
-        {isEdit ? "Edit LEAF Snapshot (Builder)" : "Create LEAF Snapshot (Builder)"}
+        {isEdit ? "Edit LEAF Snapshot" : "Create LEAF Snapshot"}
       </div>
 
       <div style={{ color: "var(--muted)", marginBottom: 16 }}>
-        Everything the report can show should be editable here. Run calculations from these inputs.
+        Everything that shows up in the report should be editable here. Calculations preview live.
       </div>
 
-      {/* ───────────────── Existing System (Report-facing) ───────────────── */}
-      <SectionTitle>Existing System (Report Content)</SectionTitle>
-
-      <div className="rei-formGrid">
-        <Field label="Display Label (report)">
-          <input
-            className="rei-search"
-            value={working.existing.label ?? ""}
-            onChange={(e) => updateExisting("label", e.target.value)}
-            placeholder="e.g. Old gas furnace"
-          />
-        </Field>
-
-        <Field label="Status Pill Text (report)">
-          <input
-            className="rei-search"
-            value={working.existing.statusPillText ?? ""}
-            onChange={(e) => updateExisting("statusPillText", e.target.value)}
-            placeholder="e.g. Near end-of-life"
-          />
-        </Field>
-
-        <Field label="Existing Image URL (optional)">
-          <input
-            className="rei-search"
-            value={working.existing.imageUrl ?? ""}
-            onChange={(e) => updateExisting("imageUrl", e.target.value)}
-            placeholder="https://..."
-          />
-        </Field>
-
-        <Field label="Annual Cost Range Min ($/yr)">
-          <input
-            className="rei-search"
-            type="number"
-            value={working.existing.annualCostRange?.min ?? ""}
-            onChange={(e) => {
-              const v = numOrNull(e.target.value);
-              updateExisting("annualCostRange", {
-                min: v ?? 0,
-                max: working.existing.annualCostRange?.max ?? 0,
-              });
-            }}
-          />
-        </Field>
-
-        <Field label="Annual Cost Range Max ($/yr)">
-          <input
-            className="rei-search"
-            type="number"
-            value={working.existing.annualCostRange?.max ?? ""}
-            onChange={(e) => {
-              const v = numOrNull(e.target.value);
-              updateExisting("annualCostRange", {
-                min: working.existing.annualCostRange?.min ?? 0,
-                max: v ?? 0,
-              });
-            }}
-          />
-        </Field>
-
-        <Field label="Carbon Range Min (lbs/yr)">
-          <input
-            className="rei-search"
-            type="number"
-            value={working.existing.carbonRange?.min ?? ""}
-            onChange={(e) => {
-              const v = numOrNull(e.target.value);
-              updateExisting("carbonRange", {
-                min: v ?? 0,
-                max: working.existing.carbonRange?.max ?? 0,
-              });
-            }}
-          />
-        </Field>
-
-        <Field label="Carbon Range Max (lbs/yr)">
-          <input
-            className="rei-search"
-            type="number"
-            value={working.existing.carbonRange?.max ?? ""}
-            onChange={(e) => {
-              const v = numOrNull(e.target.value);
-              updateExisting("carbonRange", {
-                min: working.existing.carbonRange?.min ?? 0,
-                max: v ?? 0,
-              });
-            }}
-          />
-        </Field>
-      </div>
-
-      {/* ───────────────── Existing Condition (Calc-facing) ───────────────── */}
-      <SectionTitle>Existing System Condition (Calculation Inputs)</SectionTitle>
+      {/* ───────────────── Existing System ───────────────── */}
+      <SectionTitle>Existing System (Inputs)</SectionTitle>
 
       <div className="rei-formGrid">
         <Field label="Age (years)">
@@ -441,8 +287,10 @@ export default function SnapshotEditor({
             className="rei-search"
             type="number"
             value={working.existing.ageYears ?? ""}
-            onChange={(e) => updateExisting("ageYears", numOrNull(e.target.value))}
-            placeholder="10"
+            onChange={(e) => {
+              const v = e.target.value;
+              updateExisting("ageYears", v === "" ? null : Number(v));
+            }}
           />
         </Field>
 
@@ -450,7 +298,10 @@ export default function SnapshotEditor({
           <select
             className="rei-search"
             value={working.existing.wear ?? ""}
-            onChange={(e) => updateExisting("wear", numOrNull(e.target.value) as any)}
+            onChange={(e) => {
+              const v = e.target.value;
+              updateExisting("wear", v === "" ? null : Number(v));
+            }}
           >
             <option value="">—</option>
             {[1, 2, 3, 4, 5].map((v) => (
@@ -485,20 +336,77 @@ export default function SnapshotEditor({
         </Field>
       </div>
 
+      {/* ───────────────── Calculation Inputs ───────────────── */}
+      <SectionTitle>Calculation Inputs (Editable)</SectionTitle>
+
+      <div className="rei-formGrid">
+        <Field label="Annual utility spend ($/yr)">
+          <input
+            className="rei-search"
+            type="number"
+            value={working.calculationInputs?.annualUtilitySpend ?? ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              updateCalc("annualUtilitySpend", v === "" ? undefined : Number(v));
+            }}
+          />
+        </Field>
+
+        <Field label="System share of utility (0–1)">
+          <input
+            className="rei-search"
+            type="number"
+            step="0.01"
+            min="0"
+            max="1"
+            value={working.calculationInputs?.systemShare ?? ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              updateCalc("systemShare", v === "" ? undefined : Number(v));
+            }}
+          />
+        </Field>
+
+        <Field label="Expected life (years)">
+          <input
+            className="rei-search"
+            type="number"
+            value={working.calculationInputs?.expectedLife ?? ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              updateCalc("expectedLife", v === "" ? undefined : Number(v));
+            }}
+          />
+        </Field>
+
+        <Field label="Partial failure (broken-but-still-used)">
+          <select
+            className="rei-search"
+            value={working.calculationInputs?.partialFailure ? "Yes" : "No"}
+            onChange={(e) => updateCalc("partialFailure", e.target.value === "Yes")}
+          >
+            <option value="No">No</option>
+            <option value="Yes">Yes</option>
+          </select>
+        </Field>
+      </div>
+
       {/* ───────────────── Suggested Upgrade ───────────────── */}
-      <SectionTitle>Proposed Upgrade (Editable Report + Calc Inputs)</SectionTitle>
+      <SectionTitle>Suggested Upgrade (Editable)</SectionTitle>
 
       <div className="rei-formGrid">
         <Field label="Catalog System">
           <select
             className="rei-search"
             value={working.suggested.catalogSystemId || ""}
-            onChange={(e) => updateSuggested("catalogSystemId", e.target.value || null)}
+            onChange={(e) =>
+              updateSuggested("catalogSystemId", e.target.value || null)
+            }
           >
             <option value="">— Select system —</option>
             {catalogSystems.map((s) => (
               <option key={s.id} value={s.id}>
-                {s.name}
+                {s.category} — {s.name}
               </option>
             ))}
           </select>
@@ -507,7 +415,7 @@ export default function SnapshotEditor({
         <Field label="Tier">
           <select
             className="rei-search"
-            value={working.suggested.tier}
+            value={working.suggested.tier || "better"}
             onChange={(e) => updateSuggested("tier", e.target.value as any)}
           >
             <option value="good">Good</option>
@@ -516,233 +424,126 @@ export default function SnapshotEditor({
           </select>
         </Field>
 
-        <Field label="Proposed Display Name (current tier)">
+        <Field label="Suggested display name (base)">
           <input
             className="rei-search"
-            value={(working.suggested.recommendedNameByTier?.[tier] ?? "") as string}
-            onChange={(e) =>
-              updateSuggested("recommendedNameByTier", {
-                ...(working.suggested.recommendedNameByTier || {}),
-                [tier]: e.target.value,
-              })
-            }
-            placeholder="e.g. High-efficiency gas furnace"
+            value={working.suggested.name}
+            onChange={(e) => updateSuggested("name", e.target.value)}
+            placeholder="What the report should show"
           />
         </Field>
 
-        <Field label="Status Pill Text (current tier)">
-          <input
-            className="rei-search"
-            value={(working.suggested.statusPillTextByTier?.[tier] ?? "") as string}
-            onChange={(e) =>
-              updateSuggested("statusPillTextByTier", {
-                ...(working.suggested.statusPillTextByTier || {}),
-                [tier]: e.target.value,
-              })
-            }
-            placeholder="e.g. Recommended"
-          />
-        </Field>
-
-        <Field label="Proposed Image URL (optional)">
-          <input
-            className="rei-search"
-            value={working.suggested.imageUrl ?? ""}
-            onChange={(e) => updateSuggested("imageUrl", e.target.value)}
-            placeholder="https://..."
-          />
-        </Field>
-
-        <Field label="Install Cost (optional, $)">
+        <Field label="Install cost (est.)">
           <input
             className="rei-search"
             type="number"
             value={working.suggested.estCost ?? ""}
-            onChange={(e) => updateSuggested("estCost", numOrNull(e.target.value))}
-            placeholder="Leave blank if using tier ranges"
+            onChange={(e) => {
+              const v = e.target.value;
+              updateSuggested("estCost", v === "" ? null : Number(v));
+            }}
+            placeholder="Optional"
           />
         </Field>
       </div>
 
-      {/* ───────────────── Tier Ranges (the slider/report should use these) ───────────────── */}
-      <SectionTitle>Tier Ranges (Report Slider Inputs)</SectionTitle>
+      {/* ───────────────── Tier Overrides ───────────────── */}
+      <SectionTitle>Tier Overrides (This drives report ranges)</SectionTitle>
 
       <div className="rei-formGrid">
-        <Field label={`Install Range Min ($) — ${tier}`}>
+        <Field label={`${tier.toUpperCase()} price range min`}>
           <input
             className="rei-search"
             type="number"
-            value={tierBlock.leafPriceRange?.min ?? ""}
+            value={tierOverride?.leafPriceRange?.min ?? ""}
             onChange={(e) => {
-              const v = numOrNull(e.target.value);
-              setWorking((w) =>
-                touch(
-                  setTierBlock(w, tier, {
-                    leafPriceRange: {
-                      min: v ?? undefined,
-                      max: getTierBlock(w, tier).leafPriceRange?.max,
-                    },
-                  })
-                )
-              );
+              const v = e.target.value;
+              updateTierOverride(tier, {
+                leafPriceRange: {
+                  ...(tierOverride?.leafPriceRange || {}),
+                  min: v === "" ? undefined : Number(v),
+                },
+              });
             }}
           />
         </Field>
 
-        <Field label={`Install Range Max ($) — ${tier}`}>
+        <Field label={`${tier.toUpperCase()} price range max`}>
           <input
             className="rei-search"
             type="number"
-            value={tierBlock.leafPriceRange?.max ?? ""}
+            value={tierOverride?.leafPriceRange?.max ?? ""}
             onChange={(e) => {
-              const v = numOrNull(e.target.value);
-              setWorking((w) =>
-                touch(
-                  setTierBlock(w, tier, {
-                    leafPriceRange: {
-                      min: getTierBlock(w, tier).leafPriceRange?.min,
-                      max: v ?? undefined,
-                    },
-                  })
-                )
-              );
+              const v = e.target.value;
+              updateTierOverride(tier, {
+                leafPriceRange: {
+                  ...(tierOverride?.leafPriceRange || {}),
+                  max: v === "" ? undefined : Number(v),
+                },
+              });
             }}
           />
         </Field>
 
-        <Field label={`Base Monthly Savings Min ($/mo) — ${tier}`}>
+        <Field label={`${tier.toUpperCase()} monthly savings min`}>
           <input
             className="rei-search"
             type="number"
-            value={tierBlock.baseMonthlySavings?.min ?? ""}
+            value={tierOverride?.baseMonthlySavings?.min ?? ""}
             onChange={(e) => {
-              const v = numOrNull(e.target.value);
-              setWorking((w) =>
-                touch(
-                  setTierBlock(w, tier, {
-                    baseMonthlySavings: {
-                      min: v ?? undefined,
-                      max: getTierBlock(w, tier).baseMonthlySavings?.max,
-                    },
-                  })
-                )
-              );
+              const v = e.target.value;
+              updateTierOverride(tier, {
+                baseMonthlySavings: {
+                  ...(tierOverride?.baseMonthlySavings || {}),
+                  min: v === "" ? undefined : Number(v),
+                },
+              });
             }}
           />
         </Field>
 
-        <Field label={`Base Monthly Savings Max ($/mo) — ${tier}`}>
+        <Field label={`${tier.toUpperCase()} monthly savings max`}>
           <input
             className="rei-search"
             type="number"
-            value={tierBlock.baseMonthlySavings?.max ?? ""}
+            value={tierOverride?.baseMonthlySavings?.max ?? ""}
             onChange={(e) => {
-              const v = numOrNull(e.target.value);
-              setWorking((w) =>
-                touch(
-                  setTierBlock(w, tier, {
-                    baseMonthlySavings: {
-                      min: getTierBlock(w, tier).baseMonthlySavings?.min,
-                      max: v ?? undefined,
-                    },
-                  })
-                )
-              );
+              const v = e.target.value;
+              updateTierOverride(tier, {
+                baseMonthlySavings: {
+                  ...(tierOverride?.baseMonthlySavings || {}),
+                  max: v === "" ? undefined : Number(v),
+                },
+              });
             }}
           />
         </Field>
       </div>
 
-      {/* ───────────────── Calculation Inputs ───────────────── */}
-      <SectionTitle>Calculation Inputs (No Fixed Data)</SectionTitle>
+      {/* ───────────────── Live Preview ───────────────── */}
+      <SectionTitle>Live Calculation Preview</SectionTitle>
 
-      <div className="rei-formGrid">
-        <Field label="Annual Utility Spend ($/yr)">
-          <input
-            className="rei-search"
-            type="number"
-            value={working.calculationInputs?.annualUtilitySpend ?? ""}
-            onChange={(e) => updateCalc("annualUtilitySpend", numOrNull(e.target.value) ?? undefined)}
-            placeholder="e.g. 3600"
-          />
-        </Field>
-
-        <Field label="System Share of Utility (0–1)">
-          <input
-            className="rei-search"
-            type="number"
-            step="0.01"
-            value={working.calculationInputs?.systemShare ?? ""}
-            onChange={(e) => {
-              const v = numOrNull(e.target.value);
-              updateCalc("systemShare", v === null ? undefined : clamp01(v));
-            }}
-            placeholder="e.g. 0.40"
-          />
-        </Field>
-
-        <Field label="Expected Life (years)">
-          <input
-            className="rei-search"
-            type="number"
-            value={working.calculationInputs?.expectedLife ?? ""}
-            onChange={(e) => updateCalc("expectedLife", numOrNull(e.target.value) ?? undefined)}
-            placeholder="e.g. 20"
-          />
-        </Field>
-
-        <Field label="Partial Failure / Not Fully Running">
-          <select
-            className="rei-search"
-            value={working.calculationInputs?.partialFailure ? "yes" : "no"}
-            onChange={(e) => updateCalc("partialFailure", e.target.value === "yes")}
-          >
-            <option value="no">No</option>
-            <option value="yes">Yes</option>
-          </select>
-        </Field>
-      </div>
-
-      {/* ───────────────── Run + Preview ───────────────── */}
       <div
         style={{
-          display: "flex",
-          gap: 10,
-          alignItems: "center",
-          marginTop: 14,
-          paddingTop: 14,
-          borderTop: "1px solid rgba(255,255,255,0.06)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          borderRadius: 14,
+          padding: 14,
+          background: "rgba(0,0,0,0.12)",
         }}
       >
-        <button className="rei-btn rei-btnPrimary" type="button" onClick={runCalculations}>
-          Run Calculations
-        </button>
-
-        <div style={{ color: "var(--muted)", fontSize: 13 }}>
-          Uses *only* the inputs on this page (no fixed report numbers).
-        </div>
-      </div>
-
-      <div style={{ marginTop: 12 }}>
-        <SectionTitle>Calculation Preview</SectionTitle>
-
         {!calcPreview ? (
-          <div style={{ color: "var(--muted)" }}>Run calculations to see results.</div>
+          <div style={{ color: "var(--muted)" }}>Select a tier to see preview.</div>
         ) : (
-          <div className="rei-formGrid">
-            <MiniStat label="Current Waste" value={`${Math.round(calcPreview.currentWaste)}%`} />
-            <MiniStat label="Recoverable Waste" value={`${Math.round(calcPreview.recoverableWaste)}%`} />
-            <MiniStat
-              label="Annual Savings Range"
-              value={`$${Math.round(calcPreview.minAnnual).toLocaleString()}–$${Math.round(
-                calcPreview.maxAnnual
-              ).toLocaleString()}`}
+          <div style={{ display: "grid", gap: 8 }}>
+            <Row k="Current waste" v={`${Math.round(calcPreview.currentWaste)}%`} />
+            <Row k="Recoverable waste" v={`${Math.round(calcPreview.recoverableWaste)}%`} />
+            <Row
+              k="Annual savings range"
+              v={`$${Math.round(calcPreview.minAnnual)} – $${Math.round(calcPreview.maxAnnual)} (center $${Math.round(calcPreview.centerAnnual)})`}
             />
-            <MiniStat
-              label="Monthly Savings Range"
-              value={`$${Math.round(calcPreview.minMonthly).toLocaleString()}–$${Math.round(
-                calcPreview.maxMonthly
-              ).toLocaleString()}`}
+            <Row
+              k="Monthly savings range"
+              v={`$${Math.round(calcPreview.minMonthly)} – $${Math.round(calcPreview.maxMonthly)} (center $${Math.round(calcPreview.centerMonthly)})`}
             />
           </div>
         )}
@@ -773,30 +574,35 @@ export default function SnapshotEditor({
 ───────────────────────────────────────────── */
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <div style={{ fontWeight: 800, margin: "18px 0 8px" }}>{children}</div>;
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label style={{ display: "grid", gap: 6 }}>
-      <div style={{ fontSize: 12, fontWeight: 900, color: "var(--muted)" }}>{label}</div>
+    <div style={{ fontWeight: 800, margin: "18px 0 8px" }}>
       {children}
-    </label>
+    </div>
   );
 }
 
-function MiniStat({ label, value }: { label: string; value: string }) {
+function Row({ k, v }: { k: string; v: string }) {
   return (
-    <div
-      style={{
-        border: "1px solid rgba(255,255,255,0.06)",
-        borderRadius: 12,
-        padding: 12,
-        background: "rgba(255,255,255,0.03)",
-      }}
-    >
-      <div style={{ fontSize: 12, color: "var(--muted)", fontWeight: 900 }}>{label}</div>
-      <div style={{ fontSize: 16, fontWeight: 900, marginTop: 6 }}>{value}</div>
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+      <div style={{ color: "var(--muted)", fontWeight: 800 }}>{k}</div>
+      <div style={{ fontWeight: 900 }}>{v}</div>
     </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label style={{ display: "grid", gap: 6 }}>
+      <div style={{ fontSize: 12, fontWeight: 900, color: "var(--muted)" }}>
+        {label}
+      </div>
+      {children}
+    </label>
   );
 }
