@@ -1,12 +1,11 @@
 // src/app/admin/jobs/[jobId]/report/page.tsx
 "use client";
-import { loadLocalJobs } from "../../_data/localJobs";
-import { MOCK_JOBS } from "../../_data/mockJobs";
-import { useEffect, useMemo } from "react";
+
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 
+import { loadLocalJobs, findLocalJob } from "../../../_data/localJobs";
 import { MOCK_JOBS, type Job } from "../../../_data/mockJobs";
-import { findLocalJob } from "../../../_data/localJobs";
 import { loadLocalSnapshots, snapshotsForJob } from "../../../_data/localSnapshots";
 import { MOCK_SYSTEMS } from "../../../_data/mockSystems";
 
