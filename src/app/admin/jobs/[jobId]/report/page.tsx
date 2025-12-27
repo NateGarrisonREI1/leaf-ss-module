@@ -643,7 +643,7 @@ export default function JobReportPage() {
                     <div className="w-24 h-24 rounded-3xl overflow-hidden border border-neutral-800 bg-black/40" />
                     <div className="flex-1 text-xs space-y-1">
                       <div className="font-semibold">
-                        {p.snapshot?.existing?.label || `Existing ${p.existingSubtype || p.existingType || "system"}`}
+                        {`Existing ${p.existingSubtype || p.existingType || "system"}`}
                       </div>
                       <div>Age: <b>{p.snapshot?.existing?.ageYears ? `${p.snapshot.existing.ageYears} yrs` : "—"}</b></div>
                       <div>Wear: <b>{p.snapshot?.existing?.wear ? `${p.snapshot.existing.wear}/5` : "—"}</b></div>
