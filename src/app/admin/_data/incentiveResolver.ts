@@ -49,17 +49,18 @@ export function resolveApplicableIncentives(args: {
         incentiveMatchesSystem(i, catalogSystem.id, systemTags) &&
         incentiveApplies(i, jobZip, jobState)
     )
-    .map((i) => ({
-      id: i.id,
-      name: i.name,
-      amount: Number(i.amount) || 0,
-      scope: mapScope(i),
-      applied: true,
-      source: "catalog",
-    }))
+    .map(
+      (i): JobAppliedIncentive => ({
+        id: i.id,
+        name: i.name,
+        amount: Number(i.amount) || 0,
+        scope: mapScope(i),
+        applied: true,
+        source: "catalog" as const,
+      })
+    )
     .filter((i) => i.amount > 0);
 }
-
 export function groupIncentives(list: JobAppliedIncentive[]) {
   return {
     federal: list.filter((x) => x.scope === "federal"),
