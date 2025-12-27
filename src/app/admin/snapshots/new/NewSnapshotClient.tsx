@@ -15,7 +15,7 @@ import {
   normalizeSystemType,
   type IncentiveResource,
   type IncentiveAmount,
-} from "../../../../lib/incentives/incentiveRules";
+} from "@/app/admin/_data/incentives/incentiveResolver";
 
 function nowIso() {
   return new Date().toISOString();
