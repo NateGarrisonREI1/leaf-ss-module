@@ -1,5 +1,6 @@
 // src/app/admin/jobs/[jobId]/report/page.tsx
 "use client";
+import { loadLocalJobs } from "../../_data/localJobs";
 import { MOCK_JOBS } from "../../_data/mockJobs";
 import { useEffect, useMemo } from "react";
 import { useParams } from "next/navigation";
@@ -80,23 +81,35 @@ function getEffectiveLeafConfig() {
 ───────────────────────────────────────────── */
 
 export default function JobReportPage() {
-  const params = useParams<{ jobId: string }>();
-  const jobId = params?.jobId;
+ const params = useParams();
+const jobId = useMemo(() => {
+  const raw = (params as any)?.jobId;
+  return Array.isArray(raw) ? raw[0] : raw;
+}, [params]);
 
-  const job: Job | null = useMemo(() => {
-    if (!jobId) return null;
-    return findLocalJob(jobId) || MOCK_JOBS.find((j) => j.id === jobId) || null;
-  }, [jobId]);
+const job: Job | null = useMemo(() => {
+  if (!jobId) return null;
 
-  const snaps: any[] = useMemo(() => {
-    if (!jobId) return [];
-    try {
-      loadLocalSnapshots();
-      return snapshotsForJob(jobId) || [];
-    } catch {
-      return [];
-    }
-  }, [jobId]);
+  // IMPORTANT: ensure localStorage cache is loaded before searching
+  try {
+    loadLocalJobs();
+  } catch {}
+
+  // 1) local job first
+  const local = findLocalJob(jobId);
+  if (local) return local;
+
+  // 2) exact mock match
+  const mock = MOCK_JOBS.find((j) => j.id === jobId);
+  if (mock) return mock;
+
+  // 3) if someone navigates with "1001" instead of "job_1001"
+  const mock2 = MOCK_JOBS.find((j) => j.id === `job_${jobId}`);
+  if (mock2) return mock2;
+
+  return null;
+}, [jobId]);
+
 
   const pages = useMemo(() => {
     // show up to 3 pages (like your original)
