@@ -6,6 +6,13 @@ export type CatalogSystem = {
   name: string;
   highlights: string[];
 
+  /**
+   * ✅ NEW (Phase 3)
+   * Incentives attached to this catalog system
+   * Stores Incentive IDs only
+   */
+  incentiveIds?: string[];
+
   defaultAssumptions?: {
     estCost?: number;
     estAnnualSavings?: number;
