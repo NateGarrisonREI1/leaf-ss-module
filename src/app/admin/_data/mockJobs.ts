@@ -10,13 +10,17 @@ export type ExistingSystem = {
 
 export type Job = {
   id: string;
-  reportId: string;
-  customerName: string;
+  reportId?: string;
+  customerName?: string;
   address?: string;
   sqft?: number;
   yearBuilt?: number;
-  createdAt: string; // ISO
-  systems: ExistingSystem[];
+  createdAt?: string;
+  systems?: any[];
+
+  // ✅ add:
+  zip?: string;
+  state?: string;
 };
 
 export const MOCK_JOBS: Job[] = [
