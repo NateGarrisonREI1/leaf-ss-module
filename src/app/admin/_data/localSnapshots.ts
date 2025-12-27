@@ -135,25 +135,40 @@ function withCalculatedSavings(snapshot: SnapshotDraft): SnapshotDraft {
   const expectedLife = snapshot.calculationInputs?.expectedLife ?? 20;
   const partialFailure = snapshot.calculationInputs?.partialFailure;
 
-   const wear = snapshot.existing.wear ?? 3;       // fallback: mid wear
-const age = snapshot.existing.ageYears ?? 10;   // fallback: mid age
+  // Null-safe existing inputs
+  const wear = snapshot.existing.wear ?? 3; // fallback: mid wear
+  const age = snapshot.existing.ageYears ?? 10; // fallback: mid age
 
-const result = calculateLeafSavings({
-  wear,
-  age,
-  tier,
-  annualUtilitySpend,
-  systemShare,
-  expectedLife,
-  partialFailure,
-});
+  const result = calculateLeafSavings({
+    wear,
+    age,
+    tier,
+    annualUtilitySpend,
+    systemShare,
+    expectedLife,
+    partialFailure,
+  });
 
   return {
     ...snapshot,
-    calculatedSavings: result,
+    calculatedSavings: {
+      currentWaste: result.currentWaste,
+      recoverableWaste: result.recoverableWaste,
+
+      // map annual
+      minAnnual: result.minAnnualSavings,
+      maxAnnual: result.maxAnnualSavings,
+      centerAnnual: result.annualSavingsCenter,
+
+      // map monthly
+      minMonthly: result.minMonthlySavings,
+      maxMonthly: result.maxMonthlySavings,
+      centerMonthly: result.centerMonthlySavings,
+    },
     updatedAt: new Date().toISOString(),
   };
 }
+
 
 export function upsertLocalSnapshot(draft: SnapshotDraft) {
   const items = loadLocalSnapshots();
