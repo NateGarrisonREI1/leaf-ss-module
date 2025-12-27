@@ -174,23 +174,24 @@ export default function SnapshotEditor({
   }}
 />
 
-        </Field>
+       <Field label="Wear (1–5)">
+  <select
+    className="rei-search"
+    value={working.existing.wear ?? ""}
+    onChange={(e) => {
+      const v = e.target.value;
+      updateExisting("wear", v === "" ? null : Number(v));
+    }}
+  >
+    <option value="">—</option>
+    {[1, 2, 3, 4, 5].map((v) => (
+      <option key={v} value={v}>
+        {v}
+      </option>
+    ))}
+  </select>
+</Field>
 
-        <Field label="Wear (1–5)">
-          <select
-            className="rei-search"
-            value={working.existing.wear}
-            onChange={(e) =>
-              updateExisting("wear", Number(e.target.value) as any)
-            }
-          >
-            {[1, 2, 3, 4, 5].map((v) => (
-              <option key={v} value={v}>
-                {v}
-              </option>
-            ))}
-          </select>
-        </Field>
 
         <Field label="Operational">
           <select
