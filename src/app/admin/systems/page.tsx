@@ -13,7 +13,7 @@ type CatalogSystem = {
   highlights: string[];
   tags?: string[];
 
-  /** ✅ Phase 3 */
+  /** Phase 3 */
   incentiveIds?: string[];
 
   defaultAssumptions: {
@@ -37,14 +37,8 @@ type CatalogSystem = {
 
 const STORAGE_KEY = "REI_LOCAL_CATALOG_V1";
 
-function safeId(prefix = "cat") {
+function safeId(prefix = "sys") {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
-}
-
-function money(n?: number | null) {
-  const v = typeof n === "number" && isFinite(n) ? n : null;
-  if (v == null) return "—";
-  return "$" + Math.round(v).toLocaleString("en-US");
 }
 
 function numberOrUndef(v: string): number | undefined {
@@ -70,28 +64,26 @@ function parseTags(raw: string): string[] {
 function loadLocalCatalog(): CatalogSystem[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed as CatalogSystem[];
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
 }
 
-function saveLocalCatalog(items: CatalogSystem[]) {
+function saveLocalCatalog(list: CatalogSystem[]) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
 }
 
 export default function SystemsCatalogPage() {
-  const [localItems, setLocalItems] = useState<CatalogSystem[]>([]);
+  const [systems, setSystems] = useState<CatalogSystem[]>([]);
   const [incentives, setIncentives] = useState<Incentive[]>([]);
+
   const [mode, setMode] = useState<"view" | "add" | "edit">("view");
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // form state
+  // form
   const [category, setCategory] = useState<CatalogSystem["category"]>("HVAC");
   const [name, setName] = useState("");
   const [highlights, setHighlights] = useState("");
@@ -101,14 +93,12 @@ export default function SystemsCatalogPage() {
   const [estPaybackYears, setEstPaybackYears] = useState("");
   const [incentiveIds, setIncentiveIds] = useState<string[]>([]);
 
+  const [errors, setErrors] = useState<{ name?: string }>({});
+
   useEffect(() => {
-    setLocalItems(loadLocalCatalog());
+    setSystems(loadLocalCatalog());
     setIncentives(loadIncentives());
   }, []);
-
-  const combinedCatalog: CatalogSystem[] = useMemo(() => {
-    return localItems;
-  }, [localItems]);
 
   function resetForm() {
     setCategory("HVAC");
@@ -120,6 +110,7 @@ export default function SystemsCatalogPage() {
     setEstPaybackYears("");
     setIncentiveIds([]);
     setEditingId(null);
+    setErrors({});
   }
 
   function startAdd() {
@@ -128,23 +119,19 @@ export default function SystemsCatalogPage() {
   }
 
   function startEdit(id: string) {
-    const item = localItems.find((x) => x.id === id);
-    if (!item) return;
+    const s = systems.find((x) => x.id === id);
+    if (!s) return;
 
-    setCategory(item.category);
-    setName(item.name);
-    setHighlights((item.highlights || []).join(", "));
-    setTags((item.tags || []).join(", "));
-    setEstCost(item.defaultAssumptions?.estCost != null ? String(item.defaultAssumptions.estCost) : "");
-    setEstAnnualSavings(
-      item.defaultAssumptions?.estAnnualSavings != null ? String(item.defaultAssumptions.estAnnualSavings) : ""
-    );
-    setEstPaybackYears(
-      item.defaultAssumptions?.estPaybackYears != null ? String(item.defaultAssumptions.estPaybackYears) : ""
-    );
-    setIncentiveIds(item.incentiveIds || []);
-
+    setCategory(s.category);
+    setName(s.name);
+    setHighlights((s.highlights || []).join(", "));
+    setTags((s.tags || []).join(", "));
+    setEstCost(s.defaultAssumptions?.estCost?.toString() ?? "");
+    setEstAnnualSavings(s.defaultAssumptions?.estAnnualSavings?.toString() ?? "");
+    setEstPaybackYears(s.defaultAssumptions?.estPaybackYears?.toString() ?? "");
+    setIncentiveIds(s.incentiveIds || []);
     setEditingId(id);
+    setErrors({});
     setMode("edit");
   }
 
@@ -155,16 +142,16 @@ export default function SystemsCatalogPage() {
   }
 
   function upsert() {
-    const trimmedName = name.trim();
-    if (!trimmedName) {
-      alert("System name is required.");
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setErrors({ name: "System name is required." });
       return;
     }
 
     const next: CatalogSystem = {
-      id: editingId || safeId("sys"),
+      id: editingId || safeId(),
       category,
-      name: trimmedName,
+      name: trimmed,
       highlights: highlights.split(",").map((s) => s.trim()).filter(Boolean),
       tags: parseTags(tags),
       incentiveIds,
@@ -175,73 +162,132 @@ export default function SystemsCatalogPage() {
       },
     };
 
-    const nextItems =
+    const nextList =
       mode === "edit"
-        ? localItems.map((x) => (x.id === next.id ? next : x))
-        : [next, ...localItems];
+        ? systems.map((x) => (x.id === next.id ? next : x))
+        : [next, ...systems];
 
-    setLocalItems(nextItems);
-    saveLocalCatalog(nextItems);
-
+    setSystems(nextList);
+    saveLocalCatalog(nextList);
     setMode("view");
     resetForm();
   }
 
   function remove(id: string) {
-    const ok = confirm("Delete this catalog system? (local only)");
-    if (!ok) return;
-    const nextItems = localItems.filter((x) => x.id !== id);
-    setLocalItems(nextItems);
-    saveLocalCatalog(nextItems);
+    if (!confirm("Delete this catalog system? (local only)")) return;
+    const next = systems.filter((x) => x.id !== id);
+    setSystems(next);
+    saveLocalCatalog(next);
   }
 
   function seedFromMock() {
-    const ok = confirm("Copy MOCK_SYSTEMS into your editable catalog?");
-    if (!ok) return;
+    if (!confirm("Copy MOCK_SYSTEMS into your editable catalog?")) return;
 
-    const already = new Set(localItems.map((x) => x.id));
+    const existingIds = new Set(systems.map((s) => s.id));
     const seeded: CatalogSystem[] = (MOCK_SYSTEMS as any[]).map((s) => ({
-      id: already.has(s.id) ? safeId("sys") : s.id,
+      id: existingIds.has(s.id) ? safeId() : s.id,
       category: s.category,
       name: s.name,
-      highlights: Array.isArray(s.highlights) ? s.highlights : [],
-      tags: Array.isArray((s as any).tags) ? (s as any).tags : [],
+      highlights: s.highlights || [],
+      tags: s.tags || [],
       incentiveIds: [],
       defaultAssumptions: s.defaultAssumptions || {},
     }));
 
-    const nextItems = [...seeded, ...localItems];
-    setLocalItems(nextItems);
-    saveLocalCatalog(nextItems);
+    const next = [...seeded, ...systems];
+    setSystems(next);
+    saveLocalCatalog(next);
   }
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
+      {/* Header */}
       <div className="rei-card" style={{ display: "flex", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontWeight: 900, fontSize: 16 }}>Systems Catalog</div>
           <div style={{ color: "var(--muted)" }}>
-            Editable catalog for Suggested Upgrades. Incentives are attached by ID.
+            Editable catalog for Suggested Upgrades. Incentives attach by ID.
           </div>
         </div>
+
         <div style={{ display: "flex", gap: 10 }}>
-          <button className="rei-btn" onClick={seedFromMock}>Seed from MOCK_SYSTEMS</button>
-          <button className="rei-btn rei-btnPrimary" onClick={startAdd}>+ Add Catalog System</button>
+          <button className="rei-btn" onClick={seedFromMock}>
+            Seed from MOCK_SYSTEMS
+          </button>
+          <button className="rei-btn rei-btnPrimary" onClick={startAdd}>
+            + Add Catalog System
+          </button>
         </div>
       </div>
 
+      {/* Form */}
       {(mode === "add" || mode === "edit") && (
         <div className="rei-card">
           <div className="rei-formGrid">
-            {/* existing fields unchanged */}
+            <Field label="Category">
+              <select className="rei-search" value={category} onChange={(e) => setCategory(e.target.value as any)}>
+                {["HVAC","Water Heater","Windows","Doors","Lighting","Insulation","Other"].map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="System Name *">
+              <input
+                className="rei-search"
+                value={name}
+                autoFocus
+                onChange={(e) => {
+                  setName(e.target.value);
+                  if (e.target.value.trim()) setErrors({});
+                }}
+                placeholder="e.g., Ducted Heat Pump, High-Efficiency Gas Furnace"
+                style={{ borderColor: errors.name ? "#ef4444" : undefined }}
+              />
+              {errors.name && (
+                <div style={{ fontSize: 12, color: "#ef4444" }}>{errors.name}</div>
+              )}
+            </Field>
+
+            <Field label="Highlights (comma separated)">
+              <input
+                className="rei-search"
+                value={highlights}
+                onChange={(e) => setHighlights(e.target.value)}
+                placeholder="Lower CO₂, Better comfort, Rebate eligible"
+              />
+            </Field>
+
+            <Field label="Tags">
+              <input
+                className="rei-search"
+                value={tags}
+                onChange={(e) => setTags(e.target.value)}
+                placeholder="heat_pump, hvac, electrification"
+              />
+            </Field>
+
+            <Field label="Install Cost ($)">
+              <input className="rei-search" value={estCost} onChange={(e) => setEstCost(e.target.value)} />
+            </Field>
+
+            <Field label="Annual Savings ($/yr)">
+              <input className="rei-search" value={estAnnualSavings} onChange={(e) => setEstAnnualSavings(e.target.value)} />
+            </Field>
+
+            <Field label="Payback (yrs)">
+              <input className="rei-search" value={estPaybackYears} onChange={(e) => setEstPaybackYears(e.target.value)} />
+            </Field>
 
             <Field label="Attached Incentives">
               {incentives.length === 0 ? (
-                <div style={{ color: "var(--muted)", fontSize: 12 }}>No incentives defined yet.</div>
+                <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                  No incentives defined yet.
+                </div>
               ) : (
                 <div style={{ display: "grid", gap: 6 }}>
                   {incentives.map((inc) => (
-                    <label key={inc.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <label key={inc.id} style={{ display: "flex", gap: 8 }}>
                       <input
                         type="checkbox"
                         checked={incentiveIds.includes(inc.id)}
@@ -258,17 +304,62 @@ export default function SystemsCatalogPage() {
             </Field>
           </div>
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 12 }}>
-            <button className="rei-btn" onClick={() => setMode("view")}>Cancel</button>
-            <button className="rei-btn rei-btnPrimary" onClick={upsert}>
+          <div className="rei-formActions" style={{ marginTop: 14 }}>
+            <button className="rei-btn" onClick={() => setMode("view")}>
+              Cancel
+            </button>
+            <button
+              className="rei-btn rei-btnPrimary"
+              disabled={!name.trim()}
+              style={{ opacity: name.trim() ? 1 : 0.5 }}
+              onClick={upsert}
+            >
               {mode === "add" ? "Add System" : "Save Changes"}
             </button>
           </div>
         </div>
       )}
 
-      {/* list view unchanged */}
-      {/* … existing list rendering stays exactly the same … */}
+      {/* List */}
+      <div className="rei-card">
+        {systems.length === 0 ? (
+          <div style={{ color: "var(--muted)" }}>
+            No catalog systems yet.
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: 10 }}>
+            {systems.map((s) => (
+              <div
+                key={s.id}
+                style={{
+                  border: "1px solid var(--border)",
+                  borderRadius: 12,
+                  padding: 12,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 900 }}>{s.name}</div>
+                  <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                    {s.category} • {(s.highlights || []).join(" • ") || "—"}
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="rei-btn" onClick={() => startEdit(s.id)}>
+                    Edit
+                  </button>
+                  <button className="rei-btn" onClick={() => remove(s.id)}>
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -276,7 +367,9 @@ export default function SystemsCatalogPage() {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label style={{ display: "grid", gap: 6 }}>
-      <div style={{ fontSize: 12, fontWeight: 900, color: "var(--muted)" }}>{label}</div>
+      <div style={{ fontSize: 12, fontWeight: 900, color: "var(--muted)" }}>
+        {label}
+      </div>
       {children}
     </label>
   );
