@@ -1,6 +1,6 @@
 // src/app/admin/jobs/[jobId]/report/page.tsx
 "use client";
-
+import { MOCK_JOBS } from "../../_data/mockJobs";
 import { useEffect, useMemo } from "react";
 import { useParams } from "next/navigation";
 
