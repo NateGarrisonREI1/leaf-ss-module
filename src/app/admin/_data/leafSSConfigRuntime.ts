@@ -1,6 +1,6 @@
 import { loadLeafSSMasterConfig } from "./leafSSConfigStore";
 import { MOCK_SYSTEMS, type CatalogSystem } from "./mockSystems";
-import { getCatalogSystemById as getLocalCatalogSystemById } from "../../lib/catalog/catalogStore";
+import { getCatalogSystemByIdLocal } from "./catalogStore";
 
 /* ─────────────────────────────────────────────
    TYPES
@@ -38,30 +38,23 @@ function clamp(n: number, min: number, max: number) {
    LOCAL-FIRST CATALOG LOOKUP (FIXED)
 ───────────────────────────────────────────── */
 
-function getCatalogSystemById(
-  systemId: string | null
-): CatalogSystem | null {
+function getCatalogSystemById(systemId: string | null): CatalogSystem | null {
   if (!systemId) return null;
 
-  const local = getLocalCatalogSystemById(systemId);
+  // ✅ local editable catalog (localStorage) first
+  const local = getCatalogSystemByIdLocal(systemId, MOCK_SYSTEMS);
   if (local) return local as unknown as CatalogSystem;
 
-  return (
-    (MOCK_SYSTEMS.find((s) => s.id === systemId) as CatalogSystem) ||
-    null
-  );
+  // ✅ fallback to mock catalog
+  return (MOCK_SYSTEMS.find((s) => s.id === systemId) as CatalogSystem) || null;
 }
 
 /* ─────────────────────────────────────────────
    SNAPSHOT + CATALOG MERGE (UNCHANGED)
 ───────────────────────────────────────────── */
 
-function mergeSnapshotWithCatalog(
-  snapshot: any,
-  catalog: CatalogSystem | null
-) {
-  const overrides: LeafSSOverrides | undefined = (catalog as any)
-    ?.leafSSOverrides;
+function mergeSnapshotWithCatalog(snapshot: any, catalog: CatalogSystem | null) {
+  const overrides: LeafSSOverrides | undefined = (catalog as any)?.leafSSOverrides;
   if (!snapshot || !overrides) return snapshot;
 
   const out = clone(snapshot);
@@ -90,21 +83,18 @@ function mergeSnapshotWithCatalog(
     }
 
     if (tierOverride.recommendedName || tierOverride.statusPillText) {
-      out.recommendedSystemCard =
-        out.recommendedSystemCard || {};
+      out.recommendedSystemCard = out.recommendedSystemCard || {};
       out.recommendedSystemCard.recommendedNameByTier =
         out.recommendedSystemCard.recommendedNameByTier || {};
       out.recommendedSystemCard.statusPillTextByTier =
         out.recommendedSystemCard.statusPillTextByTier || {};
 
       if (tierOverride.recommendedName) {
-        out.recommendedSystemCard.recommendedNameByTier[t] =
-          tierOverride.recommendedName;
+        out.recommendedSystemCard.recommendedNameByTier[t] = tierOverride.recommendedName;
       }
 
       if (tierOverride.statusPillText) {
-        out.recommendedSystemCard.statusPillTextByTier[t] =
-          tierOverride.statusPillText;
+        out.recommendedSystemCard.statusPillTextByTier[t] = tierOverride.statusPillText;
       }
     }
   }
@@ -120,10 +110,7 @@ function getMasterConfig() {
    PUBLIC SNAPSHOT ACCESS
 ───────────────────────────────────────────── */
 
-export function getSnapshotByIndex(
-  i: number,
-  catalogSystemId?: string | null
-) {
+export function getSnapshotByIndex(i: number, catalogSystemId?: string | null) {
   const cfg = getMasterConfig();
   const snaps = cfg?.snapshots || [];
   const idx = Math.max(0, Math.min(snaps.length - 1, i));
@@ -134,11 +121,7 @@ export function getSnapshotByIndex(
 }
 
 export function getTier(snapshot: any, tier: LeafTierKey) {
-  return (
-    snapshot?.tiers?.[tier] ||
-    snapshot?.tiers?.better ||
-    snapshot?.tiers?.good
-  );
+  return snapshot?.tiers?.[tier] || snapshot?.tiers?.better || snapshot?.tiers?.good;
 }
 
 /* ─────────────────────────────────────────────
@@ -168,11 +151,7 @@ export function calculateLeafSavings(args: {
   const ageFactor = clamp(age / expectedLife, 0, 1);
   const failureFactor = partialFailure ? 1 : 0;
 
-  let currentWaste =
-    0.45 * wearFactor +
-    0.35 * ageFactor +
-    0.2 * failureFactor;
-
+  let currentWaste = 0.45 * wearFactor + 0.35 * ageFactor + 0.2 * failureFactor;
   currentWaste = clamp(currentWaste, 0.15, 0.95);
 
   const tierRecovery: Record<LeafTierKey, number> = {
@@ -183,11 +162,8 @@ export function calculateLeafSavings(args: {
 
   const recoverableWaste = currentWaste * tierRecovery[tier];
 
-  const annualSystemCost =
-    annualUtilitySpend * clamp(systemShare, 0, 1);
-
-  const annualSavingsCenter =
-    annualSystemCost * recoverableWaste;
+  const annualSystemCost = annualUtilitySpend * clamp(systemShare, 0, 1);
+  const annualSavingsCenter = annualSystemCost * recoverableWaste;
 
   const minAnnualSavings = annualSavingsCenter * 0.85;
   const maxAnnualSavings = annualSavingsCenter * 1.15;
@@ -215,18 +191,10 @@ export function classifyCostFromThresholds(args: {
   unrealLowOffsetFromMin: number;
   overpricedOffsetFromMax: number;
 }): CostClass {
-  const {
-    price,
-    tierMin,
-    tierMax,
-    unrealLowOffsetFromMin,
-    overpricedOffsetFromMax,
-  } = args;
+  const { price, tierMin, tierMax, unrealLowOffsetFromMin, overpricedOffsetFromMax } = args;
 
-  const COST_UNREALISTIC_BELOW =
-    tierMin + unrealLowOffsetFromMin;
-  const COST_OVERPRICED_ABOVE =
-    tierMax + overpricedOffsetFromMax;
+  const COST_UNREALISTIC_BELOW = tierMin + unrealLowOffsetFromMin;
+  const COST_OVERPRICED_ABOVE = tierMax + overpricedOffsetFromMax;
 
   if (price < COST_UNREALISTIC_BELOW) return "unreal_low";
   if (price < tierMin) return "low";
@@ -243,20 +211,10 @@ export function dynamicSavingsRangeFromRule(args: {
   stepSizeDollars: number;
   bumpPerStepMonthlyDollars: number;
 }) {
-  const {
-    baseMin,
-    baseMax,
-    price,
-    tierMax,
-    stepSizeDollars,
-    bumpPerStepMonthlyDollars,
-  } = args;
+  const { baseMin, baseMax, price, tierMax, stepSizeDollars, bumpPerStepMonthlyDollars } = args;
 
   const over = Math.max(0, price - tierMax);
-  const steps =
-    stepSizeDollars > 0
-      ? Math.floor(over / stepSizeDollars)
-      : 0;
+  const steps = stepSizeDollars > 0 ? Math.floor(over / stepSizeDollars) : 0;
   const bump = steps * bumpPerStepMonthlyDollars;
 
   return { min: baseMin + bump, max: baseMax + bump };
