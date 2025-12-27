@@ -135,15 +135,18 @@ function withCalculatedSavings(snapshot: SnapshotDraft): SnapshotDraft {
   const expectedLife = snapshot.calculationInputs?.expectedLife ?? 20;
   const partialFailure = snapshot.calculationInputs?.partialFailure;
 
-  const result = calculateLeafSavings({
-    wear: snapshot.existing.wear,
-    age: snapshot.existing.ageYears,
-    tier,
-    annualUtilitySpend,
-    systemShare,
-    expectedLife,
-    partialFailure,
-  });
+   const wear = snapshot.existing.wear ?? 3;       // fallback: mid wear
+const age = snapshot.existing.ageYears ?? 10;   // fallback: mid age
+
+const result = calculateLeafSavings({
+  wear,
+  age,
+  tier,
+  annualUtilitySpend,
+  systemShare,
+  expectedLife,
+  partialFailure,
+});
 
   return {
     ...snapshot,
