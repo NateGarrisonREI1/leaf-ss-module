@@ -1,7 +1,10 @@
 "use client";
+function makeSnapshotId(systemId: string) {
+  const rand = Math.floor(Math.random() * 900000) + 100000;
+  return `snap_${systemId}_${rand}`;
+}
 
 import { useEffect, useMemo, useState } from "react";
-import { v4 as uuidv4 } from "uuid";
 
 import {
   type SnapshotDraft,
