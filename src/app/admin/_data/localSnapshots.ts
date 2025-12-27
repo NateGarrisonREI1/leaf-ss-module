@@ -62,7 +62,7 @@ export type SnapshotDraft = {
           LeafTierKey,
           {
             leafPriceRange?: { min?: number; max?: number };
-            baseMonthlySavings?: { min?: number; max?: number };
+            baseMonthlySavings?: { min?: number; max?: number }; // legacy fallback
             recommendedName?: string;
             statusPillText?: string;
           }
@@ -121,29 +121,38 @@ export function saveLocalSnapshots(items: SnapshotDraft[]) {
 }
 
 /* ─────────────────────────────────────────────
-   ✅ CORE: RECALCULATE SAVINGS (NO FIXED DATA)
+   ✅ CORE: RECALCULATE SAVINGS
 ───────────────────────────────────────────── */
 
-function toNumberOrFallback(n: unknown, fallback: number) {
-  return typeof n === "number" && Number.isFinite(n) ? n : fallback;
+function mapRuntimeToSnapshot(result: ReturnType<typeof calculateLeafSavings>) {
+  return {
+    currentWaste: result.currentWaste,
+    recoverableWaste: result.recoverableWaste,
+
+    minAnnual: result.minAnnualSavings,
+    maxAnnual: result.maxAnnualSavings,
+    centerAnnual: result.annualSavingsCenter,
+
+    minMonthly: result.minMonthlySavings,
+    maxMonthly: result.maxMonthlySavings,
+    centerMonthly: result.centerMonthlySavings,
+  };
 }
 
 function withCalculatedSavings(snapshot: SnapshotDraft): SnapshotDraft {
   const tier = snapshot.suggested.tier;
   if (!tier) return snapshot;
 
-  // All of these should come from snapshot builder inputs (with safe fallbacks).
-  const annualUtilitySpend = toNumberOrFallback(
-    snapshot.calculationInputs?.annualUtilitySpend,
-    2400 // fallback only if user left blank
-  );
-  const systemShare = toNumberOrFallback(snapshot.calculationInputs?.systemShare, 0.4);
-  const expectedLife = toNumberOrFallback(snapshot.calculationInputs?.expectedLife, 20);
+  // Editable inputs captured on the snapshot builder page
+  const annualUtilitySpend =
+    snapshot.calculationInputs?.annualUtilitySpend ?? 2400; // $200/mo fallback
+  const systemShare = snapshot.calculationInputs?.systemShare ?? 0.4; // HVAC-ish fallback
+  const expectedLife = snapshot.calculationInputs?.expectedLife ?? 20;
+  const partialFailure = snapshot.calculationInputs?.partialFailure;
 
-  const wear = snapshot.existing.wear ?? 3;
-  const age = snapshot.existing.ageYears ?? 10;
-
-  const partialFailure = Boolean(snapshot.calculationInputs?.partialFailure);
+  // Existing condition (nullable in draft)
+  const wear = snapshot.existing.wear ?? 3; // fallback mid
+  const age = snapshot.existing.ageYears ?? 10; // fallback mid
 
   const result = calculateLeafSavings({
     wear,
@@ -157,36 +166,17 @@ function withCalculatedSavings(snapshot: SnapshotDraft): SnapshotDraft {
 
   return {
     ...snapshot,
-    calculatedSavings: {
-      currentWaste: result.currentWaste,
-      recoverableWaste: result.recoverableWaste,
-
-      // normalize keys into the snapshot shape
-      minAnnual: result.minAnnualSavings,
-      maxAnnual: result.maxAnnualSavings,
-      centerAnnual: result.annualSavingsCenter,
-
-      minMonthly: result.minMonthlySavings,
-      maxMonthly: result.maxMonthlySavings,
-      centerMonthly: result.centerMonthlySavings,
-    },
+    calculatedSavings: mapRuntimeToSnapshot(result),
     updatedAt: new Date().toISOString(),
   };
 }
 
-/* ─────────────────────────────────────────────
-   CRUD
-───────────────────────────────────────────── */
-
 export function upsertLocalSnapshot(draft: SnapshotDraft) {
   const items = loadLocalSnapshots();
   const i = items.findIndex((s) => s.id === draft.id);
-
   const next = withCalculatedSavings(draft);
-
   if (i >= 0) items[i] = next;
   else items.unshift(next);
-
   saveLocalSnapshots(items);
 }
 
