@@ -1,74 +1,97 @@
-import type { CatalogSystem } from "../mockSystems";
-import type { CatalogIncentive, JobAppliedIncentive, JobIncentiveScope } from "./incentiveTypes";
+// src/app/admin/_data/incentives/incentiveResolver.ts
+"use client";
 
-function normState(x: string) {
-  return (x || "").trim().toUpperCase();
-}
-function normZip(x: string) {
-  return (x || "").trim();
-}
+export type IncentiveLink = { label: string; url: string };
 
-export function incentiveApplies(i: CatalogIncentive, jobZip: string, jobState: string) {
-  const zip = normZip(jobZip);
-  const state = normState(jobState);
+export type IncentiveAmount =
+  | { kind: "flat"; value: number; unit?: string }
+  | { kind: "range"; min: number; max: number; unit?: string }
+  | { kind: "text"; value: string };
 
-  if (i.scope.type === "federal") return true;
-  if (i.scope.type === "state") return i.scope.states.map(normState).includes(state);
-  if (i.scope.type === "zip") return i.scope.zips.map(normZip).includes(zip);
-  return false;
-}
+export type IncentiveResource = {
+  id: string;
+  programName: string;
+  amount?: IncentiveAmount;
+  shortBlurb?: string;
+  links?: IncentiveLink[];
+  // optional flags used by UI
+  disabled?: boolean;
+  tags?: string[];
+  source?: "catalog" | "manual";
+};
 
-export function incentiveMatchesSystem(i: CatalogIncentive, systemId: string, systemTags: string[]) {
-  if (i.systemIds?.includes(systemId)) return true;
-  const tags = systemTags || [];
-  const incTags = i.systemTags || [];
-  return incTags.some((t) => tags.includes(t));
-}
+/**
+ * Copy blocks used by NewSnapshotClient to write a notes block.
+ * Keep these simple for now.
+ */
+export const INCENTIVE_COPY: Array<{ key: string; body: string }> = [
+  {
+    key: "general_disclaimer",
+    body:
+      "Incentives vary by location, income, utility territory, and program funding. Final eligibility and amounts must be confirmed with the program administrator.",
+  },
+  {
+    key: "federal_tax_credit_blurb",
+    body:
+      "Federal tax credits may require tax liability and are claimed when you file your taxes. Keep invoices and manufacturer certificates where applicable.",
+  },
+  {
+    key: "utility_rebate_blurb",
+    body:
+      "Utility rebates often require pre-approval, specific equipment, and licensed installation. Program funding can change or run out.",
+  },
+];
 
-function mapScope(i: CatalogIncentive): JobIncentiveScope {
-  if (i.scope.type === "federal") return "federal";
-  if (i.scope.type === "state") return "state";
-  return "local";
-}
-
-export function resolveApplicableIncentives(args: {
-  catalogSystem: CatalogSystem;
-  jobZip: string;
-  jobState: string;
-}): JobAppliedIncentive[] {
-  const { catalogSystem, jobZip, jobState } = args;
-
-  const incentives: CatalogIncentive[] = ((catalogSystem as any).incentives || []) as CatalogIncentive[];
-  if (!incentives.length) return [];
-
-  const systemTags = (catalogSystem.tags || []) as string[];
-
-  return incentives
-    .filter(
-      (i) =>
-        incentiveMatchesSystem(i, catalogSystem.id, systemTags) &&
-        incentiveApplies(i, jobZip, jobState)
-    )
-    .map(
-      (i): JobAppliedIncentive => ({
-        id: i.id,
-        name: i.name,
-        amount: Number(i.amount) || 0,
-        scope: mapScope(i),
-        applied: true,
-        source: "catalog" as const,
-      })
-    )
-    .filter((i) => i.amount > 0);
-}
-export function groupIncentives(list: JobAppliedIncentive[]) {
-  return {
-    federal: list.filter((x) => x.scope === "federal"),
-    state: list.filter((x) => x.scope === "state"),
-    local: list.filter((x) => x.scope === "local"),
-  };
+/**
+ * Normalizes a system/category string into a stable key.
+ * Example: "Water Heater" -> "water_heater"
+ */
+export function normalizeSystemType(input: string): string {
+  return String(input || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^\w_]/g, "");
 }
 
-export function sumApplied(list: JobAppliedIncentive[]) {
-  return (list || []).reduce((sum, i) => sum + (i.applied ? i.amount : 0), 0);
+/**
+ * ✅ TEMP COMPAT:
+ * Return incentives based on a simple in-file rule set,
+ * plus any locally-saved overrides (if you add that later).
+ *
+ * Right now this is intentionally conservative: it returns []
+ * unless you add rules below.
+ */
+export function getIncentivesForSystemType(
+  systemType: string,
+  ctx?: { tags?: string[]; zip?: string; state?: string }
+): IncentiveResource[] {
+  const key = normalizeSystemType(systemType);
+  const tags = (ctx?.tags || []).map((t) => normalizeSystemType(t));
+
+  // --- Minimal starter rules (edit whenever) ---
+  // Add your real rules here as you build out the incentives catalog.
+  const RULES: IncentiveResource[] = [
+    // Example:
+    // {
+    //   id: "fed_25c_hpwh",
+    //   programName: "Federal Tax Credit (25C) — Heat Pump Water Heater",
+    //   amount: { kind: "flat", value: 2000 },
+    //   shortBlurb: "Up to $2,000 credit for qualifying HPWH installs (limits apply).",
+    //   links: [{ label: "IRS 25C", url: "https://www.irs.gov/" }],
+    //   tags: ["water_heater", "heat_pump"],
+    //   source: "catalog",
+    // },
+  ];
+
+  // Match if:
+  // - rule tag matches system key OR
+  // - rule tag matches any ctx tag
+  const out = RULES.filter((r) => {
+    const rTags = (r.tags || []).map((t) => normalizeSystemType(t));
+    if (rTags.includes(key)) return true;
+    return rTags.some((t) => tags.includes(t));
+  });
+
+  return out;
 }
