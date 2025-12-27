@@ -56,7 +56,7 @@ export default function Worksheet({ job, onJobUpdated }: Props) {
 
     const nextJob: Job = {
       ...job,
-      systems: [nextSystem, ...job.systems],
+      systems: [nextSystem, ...(job.systems ?? [])],
       createdAt: job.createdAt || new Date().toISOString(),
     };
 
