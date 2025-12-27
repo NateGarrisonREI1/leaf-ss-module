@@ -4,8 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 
-import { MOCK_JOBS, type Job, type ExistingSystem } from "../../_data/mockJobs";
-import { findLocalJob, updateLocalJob } from "../../_data/localJobs";
+import { type Job, findLocalJob, updateLocalJob } from "../../_data/localJobs";
 
 import {
   deleteLocalSnapshot,
@@ -18,12 +17,22 @@ import {
 import Worksheet from "./_components/Worksheet";
 
 /**
- * Job detail page
+ * Job detail page (LOCAL ONLY)
  * - Shows Existing Systems
  * - Add/Delete Existing Systems (localStorage)
  * - Shows Saved Snapshots (Edit/Delete)
  * - "Generate Mock Report (N)" disabled if N===0
  */
+
+type ExistingSystem = {
+  id: string;
+  type?: string;
+  subtype?: string;
+  ageYears?: number | string | null;
+  operational?: string | null;
+  wear?: number | string | null;
+  maintenance?: string | null;
+};
 
 function pretty(v: any) {
   if (v === null || v === undefined || v === "") return "—";
@@ -34,9 +43,10 @@ export default function JobPage() {
   const params = useParams();
   const jobId = (params?.jobId as string) || "";
 
+  // ✅ LOCAL ONLY — no MOCK_JOBS fallback
   const initialJob: Job | null = useMemo(() => {
     if (!jobId) return null;
-    return findLocalJob(jobId) ?? MOCK_JOBS.find((j) => j.id === jobId) ?? null;
+    return findLocalJob(jobId) ?? null;
   }, [jobId]);
 
   const [job, setJob] = useState<Job | null>(initialJob);
@@ -66,8 +76,8 @@ export default function JobPage() {
   function onDeleteSystem(systemId: string) {
     if (!job) return;
 
-    const sys = (job.systems || []).find((s) => s.id === systemId);
-    const label = sys ? `${sys.type} • ${sys.subtype}` : systemId;
+    const sys = ((job as any).systems || []).find((s: any) => s.id === systemId);
+    const label = sys ? `${sys.type ?? "System"} • ${sys.subtype ?? "—"}` : systemId;
 
     const ok = confirm(
       `Delete this system?\n\n${label}\n\nThis will also delete any snapshots created from it (local only).`
@@ -76,14 +86,14 @@ export default function JobPage() {
 
     // 1) remove system
     const nextJob: Job = {
-      ...job,
-      systems: (job.systems || []).filter((s) => s.id !== systemId),
+      ...(job as any),
+      systems: ((job as any).systems || []).filter((s: any) => s.id !== systemId),
     };
     persistJob(nextJob);
 
     // 2) remove orphan snapshots tied to that system
     const all = loadLocalSnapshots();
-    const next = all.filter((s) => !(s.jobId === job.id && s.systemId === systemId));
+    const next = all.filter((s) => !(s.jobId === (job as any).id && s.systemId === systemId));
     saveLocalSnapshots(next);
 
     refreshSnapshots();
@@ -94,7 +104,7 @@ export default function JobPage() {
       <div className="rei-card" style={{ display: "grid", gap: 10 }}>
         <div style={{ fontWeight: 900, fontSize: 16 }}>Job not found</div>
         <div style={{ color: "var(--muted)" }}>
-          No job exists with id: <code>{jobId}</code>
+          No local job exists with id: <code>{jobId}</code>
         </div>
         <Link className="rei-btn" href="/admin/jobs" style={{ width: "fit-content" }}>
           ← Back to Jobs
@@ -110,9 +120,9 @@ export default function JobPage() {
     (job as any).location ??
     "";
 
-  const reportId = (job as any).reportId ?? (job as any).leafId ?? job.id;
+  const reportId = (job as any).reportId ?? (job as any).leafId ?? (job as any).id;
 
-  const existingSystems: ExistingSystem[] = (job.systems || []) as any[];
+  const existingSystems: ExistingSystem[] = (((job as any).systems || []) as any[]) ?? [];
 
   const snapshotCount = snapshots.length;
 
@@ -145,7 +155,7 @@ export default function JobPage() {
             </div>
             <div style={{ fontSize: 12 }}>
               <span style={{ color: "var(--muted)" }}>Systems:</span>{" "}
-              <b>{existingSystems?.length ?? 0}</b>
+              <b>{existingSystems.length}</b>
             </div>
             <div style={{ fontSize: 12 }}>
               <span style={{ color: "var(--muted)" }}>Snapshots:</span>{" "}
@@ -161,7 +171,7 @@ export default function JobPage() {
 
           <Link
             className={`rei-btn rei-btnPrimary ${snapshotCount === 0 ? "rei-btnDisabled" : ""}`}
-            href={snapshotCount > 0 ? `/admin/jobs/${job.id}/report` : "#"}
+            href={snapshotCount > 0 ? `/admin/jobs/${(job as any).id}/report` : "#"}
             aria-disabled={snapshotCount === 0}
             onClick={(e) => {
               if (snapshotCount === 0) {
@@ -183,8 +193,8 @@ export default function JobPage() {
       {/* Worksheet (Add Existing Systems) */}
       <div style={{ marginTop: 16 }}>
         <Worksheet
-          job={job}
-          onJobUpdated={(nextJob) => {
+          job={job as any}
+          onJobUpdated={(nextJob: Job) => {
             persistJob(nextJob);
           }}
         />
@@ -227,7 +237,7 @@ export default function JobPage() {
             <div />
           </div>
 
-          {(existingSystems || []).map((sys: any, idx: number) => {
+          {existingSystems.map((sys: any, idx: number) => {
             const type = sys.type ?? sys.category ?? "—";
             const subtype = sys.subtype ?? sys.name ?? sys.detail ?? "—";
             const ageYears = sys.ageYears ?? sys.age ?? "—";
@@ -256,7 +266,7 @@ export default function JobPage() {
 
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
                   <Link
-                    href={`/admin/snapshots/new?jobId=${encodeURIComponent(job.id)}&systemId=${encodeURIComponent(
+                    href={`/admin/snapshots/new?jobId=${encodeURIComponent((job as any).id)}&systemId=${encodeURIComponent(
                       systemId
                     )}`}
                     className="rei-btn rei-btnPrimary"
