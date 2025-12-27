@@ -252,3 +252,6 @@ input.thumb-bounce::-moz-range-thumb {
   border-color: rgba(67, 164, 25, 0.55);
   color: rgba(217, 255, 198, 0.95);
 }
+.pac-container {
+  z-index: 999999 !important;
+}
