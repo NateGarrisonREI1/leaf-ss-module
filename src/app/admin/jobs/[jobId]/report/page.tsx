@@ -10,7 +10,7 @@ import { MOCK_SYSTEMS } from "../../../_data/mockSystems";
 import {
   getIncentivesForSystemType,
   type IncentiveResource,
-} from "@/app/admin/_data/incentives/incentiveRules";
+} from "../../../_data/incentives/incentiveRules";
 import { LEAF_SS_CONFIG } from "../../../_data/leafSSConfig";
 import {
   getSnapshotByIndex,
