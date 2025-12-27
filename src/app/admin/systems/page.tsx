@@ -4,61 +4,48 @@ import { useEffect, useMemo, useState } from "react";
 import { MOCK_SYSTEMS } from "../_data/mockSystems";
 import { Incentive, loadIncentives } from "../_data/incentivesModel";
 
-type LeafTierKey = "good" | "better" | "best";
+/* ============================
+   Types
+============================ */
 
-type CatalogSystem = {
+export type LeafTierKey = "good" | "better" | "best";
+
+export type CatalogTierConfig = {
+  enabled: boolean;
+  installCostMin?: number;
+  installCostMax?: number;
+  efficiencyScore?: number; // normalized 0–100 (relative improvement strength)
+};
+
+export type CatalogSystem = {
   id: string;
-  category: "HVAC" | "Water Heater" | "Windows" | "Doors" | "Lighting" | "Insulation" | "Other";
+  category:
+    | "HVAC"
+    | "Water Heater"
+    | "Windows"
+    | "Doors"
+    | "Lighting"
+    | "Insulation"
+    | "Other";
   name: string;
   highlights: string[];
   tags?: string[];
 
-  /** Phase 3 */
+  /** Incentives attached by ID */
   incentiveIds?: string[];
 
-  defaultAssumptions: {
-    estCost?: number;
-    estAnnualSavings?: number;
-    estPaybackYears?: number;
-  };
-
-  tiers?: Partial<
-    Record<
-      LeafTierKey,
-      {
-        estCostMin?: number;
-        estCostMax?: number;
-        estSavingsMinAnnual?: number;
-        estSavingsMaxAnnual?: number;
-      }
-    >
-  >;
+  /** Tier-based configuration (NO hard savings here) */
+  tiers: Record<LeafTierKey, CatalogTierConfig>;
 };
 
-const STORAGE_KEY = "REI_LOCAL_CATALOG_V1";
+/* ============================
+   Storage helpers
+============================ */
+
+const STORAGE_KEY = "REI_LOCAL_CATALOG_V2";
 
 function safeId(prefix = "sys") {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
-}
-
-function numberOrUndef(v: string): number | undefined {
-  const n = Number(String(v ?? "").trim());
-  return Number.isFinite(n) ? n : undefined;
-}
-
-function normalizeTag(t: string): string {
-  return String(t || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "_")
-    .replace(/[^\w_]/g, "");
-}
-
-function parseTags(raw: string): string[] {
-  return raw
-    .split(",")
-    .map((s) => normalizeTag(s))
-    .filter(Boolean);
 }
 
 function loadLocalCatalog(): CatalogSystem[] {
@@ -76,6 +63,22 @@ function saveLocalCatalog(list: CatalogSystem[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
 }
 
+function num(v: string): number | undefined {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function parseList(raw: string) {
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/* ============================
+   Page
+============================ */
+
 export default function SystemsCatalogPage() {
   const [systems, setSystems] = useState<CatalogSystem[]>([]);
   const [incentives, setIncentives] = useState<Incentive[]>([]);
@@ -83,34 +86,45 @@ export default function SystemsCatalogPage() {
   const [mode, setMode] = useState<"view" | "add" | "edit">("view");
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // form
+  /* ---------- form state ---------- */
   const [category, setCategory] = useState<CatalogSystem["category"]>("HVAC");
   const [name, setName] = useState("");
   const [highlights, setHighlights] = useState("");
   const [tags, setTags] = useState("");
-  const [estCost, setEstCost] = useState("");
-  const [estAnnualSavings, setEstAnnualSavings] = useState("");
-  const [estPaybackYears, setEstPaybackYears] = useState("");
   const [incentiveIds, setIncentiveIds] = useState<string[]>([]);
 
-  const [errors, setErrors] = useState<{ name?: string }>({});
+  const emptyTier = (): CatalogTierConfig => ({
+    enabled: false,
+    installCostMin: undefined,
+    installCostMax: undefined,
+    efficiencyScore: undefined,
+  });
 
+  const [tiers, setTiers] = useState<Record<LeafTierKey, CatalogTierConfig>>({
+    good: emptyTier(),
+    better: emptyTier(),
+    best: emptyTier(),
+  });
+
+  /* ---------- load ---------- */
   useEffect(() => {
     setSystems(loadLocalCatalog());
     setIncentives(loadIncentives());
   }, []);
 
+  /* ---------- helpers ---------- */
   function resetForm() {
     setCategory("HVAC");
     setName("");
     setHighlights("");
     setTags("");
-    setEstCost("");
-    setEstAnnualSavings("");
-    setEstPaybackYears("");
     setIncentiveIds([]);
+    setTiers({
+      good: emptyTier(),
+      better: emptyTier(),
+      best: emptyTier(),
+    });
     setEditingId(null);
-    setErrors({});
   }
 
   function startAdd() {
@@ -118,20 +132,14 @@ export default function SystemsCatalogPage() {
     setMode("add");
   }
 
-  function startEdit(id: string) {
-    const s = systems.find((x) => x.id === id);
-    if (!s) return;
-
-    setCategory(s.category);
-    setName(s.name);
-    setHighlights((s.highlights || []).join(", "));
-    setTags((s.tags || []).join(", "));
-    setEstCost(s.defaultAssumptions?.estCost?.toString() ?? "");
-    setEstAnnualSavings(s.defaultAssumptions?.estAnnualSavings?.toString() ?? "");
-    setEstPaybackYears(s.defaultAssumptions?.estPaybackYears?.toString() ?? "");
-    setIncentiveIds(s.incentiveIds || []);
-    setEditingId(id);
-    setErrors({});
+  function startEdit(sys: CatalogSystem) {
+    setCategory(sys.category);
+    setName(sys.name);
+    setHighlights(sys.highlights.join(", "));
+    setTags((sys.tags || []).join(", "));
+    setIncentiveIds(sys.incentiveIds || []);
+    setTiers(sys.tiers);
+    setEditingId(sys.id);
     setMode("edit");
   }
 
@@ -141,30 +149,38 @@ export default function SystemsCatalogPage() {
     );
   }
 
-  function upsert() {
-    const trimmed = name.trim();
-    if (!trimmed) {
-      setErrors({ name: "System name is required." });
+  function updateTier(key: LeafTierKey, patch: Partial<CatalogTierConfig>) {
+    setTiers((prev) => ({
+      ...prev,
+      [key]: { ...prev[key], ...patch },
+    }));
+  }
+
+  function saveSystem() {
+    if (!name.trim()) {
+      alert("System name is required.");
+      return;
+    }
+
+    const hasAnyTier = Object.values(tiers).some((t) => t.enabled);
+    if (!hasAnyTier) {
+      alert("Enable at least one tier (Good / Better / Best).");
       return;
     }
 
     const next: CatalogSystem = {
       id: editingId || safeId(),
       category,
-      name: trimmed,
-      highlights: highlights.split(",").map((s) => s.trim()).filter(Boolean),
-      tags: parseTags(tags),
+      name: name.trim(),
+      highlights: parseList(highlights),
+      tags: parseList(tags),
       incentiveIds,
-      defaultAssumptions: {
-        estCost: numberOrUndef(estCost),
-        estAnnualSavings: numberOrUndef(estAnnualSavings),
-        estPaybackYears: numberOrUndef(estPaybackYears),
-      },
+      tiers,
     };
 
     const nextList =
       mode === "edit"
-        ? systems.map((x) => (x.id === next.id ? next : x))
+        ? systems.map((s) => (s.id === next.id ? next : s))
         : [next, ...systems];
 
     setSystems(nextList);
@@ -174,24 +190,27 @@ export default function SystemsCatalogPage() {
   }
 
   function remove(id: string) {
-    if (!confirm("Delete this catalog system? (local only)")) return;
-    const next = systems.filter((x) => x.id !== id);
+    if (!confirm("Delete this catalog system?")) return;
+    const next = systems.filter((s) => s.id !== id);
     setSystems(next);
     saveLocalCatalog(next);
   }
 
   function seedFromMock() {
-    if (!confirm("Copy MOCK_SYSTEMS into your editable catalog?")) return;
+    if (!confirm("Seed catalog from MOCK_SYSTEMS?")) return;
 
-    const existingIds = new Set(systems.map((s) => s.id));
-    const seeded: CatalogSystem[] = (MOCK_SYSTEMS as any[]).map((s) => ({
-      id: existingIds.has(s.id) ? safeId() : s.id,
+    const seeded: CatalogSystem[] = MOCK_SYSTEMS.map((s: any) => ({
+      id: safeId(),
       category: s.category,
       name: s.name,
       highlights: s.highlights || [],
       tags: s.tags || [],
       incentiveIds: [],
-      defaultAssumptions: s.defaultAssumptions || {},
+      tiers: {
+        good: { enabled: true },
+        better: { enabled: false },
+        best: { enabled: false },
+      },
     }));
 
     const next = [...seeded, ...systems];
@@ -199,17 +218,19 @@ export default function SystemsCatalogPage() {
     saveLocalCatalog(next);
   }
 
+  /* ============================
+     Render
+============================ */
+
   return (
     <div style={{ display: "grid", gap: 14 }}>
-      {/* Header */}
       <div className="rei-card" style={{ display: "flex", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontWeight: 900, fontSize: 16 }}>Systems Catalog</div>
           <div style={{ color: "var(--muted)" }}>
-            Editable catalog for Suggested Upgrades. Incentives attach by ID.
+            Defines upgrade options. Savings are calculated per-home during snapshots.
           </div>
         </div>
-
         <div style={{ display: "flex", gap: 10 }}>
           <button className="rei-btn" onClick={seedFromMock}>
             Seed from MOCK_SYSTEMS
@@ -220,12 +241,11 @@ export default function SystemsCatalogPage() {
         </div>
       </div>
 
-      {/* Form */}
       {(mode === "add" || mode === "edit") && (
         <div className="rei-card">
           <div className="rei-formGrid">
             <Field label="Category">
-              <select className="rei-search" value={category} onChange={(e) => setCategory(e.target.value as any)}>
+              <select value={category} onChange={(e) => setCategory(e.target.value as any)}>
                 {["HVAC","Water Heater","Windows","Doors","Lighting","Insulation","Other"].map((c) => (
                   <option key={c}>{c}</option>
                 ))}
@@ -233,143 +253,117 @@ export default function SystemsCatalogPage() {
             </Field>
 
             <Field label="System Name *">
-              <input
-                className="rei-search"
-                value={name}
-                autoFocus
-                onChange={(e) => {
-                  setName(e.target.value);
-                  if (e.target.value.trim()) setErrors({});
-                }}
-                placeholder="e.g., Ducted Heat Pump, High-Efficiency Gas Furnace"
-                style={{ borderColor: errors.name ? "#ef4444" : undefined }}
-              />
-              {errors.name && (
-                <div style={{ fontSize: 12, color: "#ef4444" }}>{errors.name}</div>
-              )}
+              <input value={name} onChange={(e) => setName(e.target.value)} />
             </Field>
 
             <Field label="Highlights (comma separated)">
-              <input
-                className="rei-search"
-                value={highlights}
-                onChange={(e) => setHighlights(e.target.value)}
-                placeholder="Lower CO₂, Better comfort, Rebate eligible"
-              />
+              <input value={highlights} onChange={(e) => setHighlights(e.target.value)} />
             </Field>
 
             <Field label="Tags">
-              <input
-                className="rei-search"
-                value={tags}
-                onChange={(e) => setTags(e.target.value)}
-                placeholder="heat_pump, hvac, electrification"
-              />
-            </Field>
-
-            <Field label="Install Cost ($)">
-              <input className="rei-search" value={estCost} onChange={(e) => setEstCost(e.target.value)} />
-            </Field>
-
-            <Field label="Annual Savings ($/yr)">
-              <input className="rei-search" value={estAnnualSavings} onChange={(e) => setEstAnnualSavings(e.target.value)} />
-            </Field>
-
-            <Field label="Payback (yrs)">
-              <input className="rei-search" value={estPaybackYears} onChange={(e) => setEstPaybackYears(e.target.value)} />
-            </Field>
-
-            <Field label="Attached Incentives">
-              {incentives.length === 0 ? (
-                <div style={{ color: "var(--muted)", fontSize: 12 }}>
-                  No incentives defined yet.
-                </div>
-              ) : (
-                <div style={{ display: "grid", gap: 6 }}>
-                  {incentives.map((inc) => (
-                    <label key={inc.id} style={{ display: "flex", gap: 8 }}>
-                      <input
-                        type="checkbox"
-                        checked={incentiveIds.includes(inc.id)}
-                        onChange={() => toggleIncentive(inc.id)}
-                      />
-                      <span>
-                        <b>{inc.title}</b>{" "}
-                        <span style={{ color: "var(--muted)" }}>({inc.level})</span>
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              )}
+              <input value={tags} onChange={(e) => setTags(e.target.value)} />
             </Field>
           </div>
 
-          <div className="rei-formActions" style={{ marginTop: 14 }}>
+          {/* Tiers */}
+          <div style={{ marginTop: 16, display: "grid", gap: 14 }}>
+            {(["good", "better", "best"] as LeafTierKey[]).map((tier) => (
+              <div key={tier} style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 12 }}>
+                <label style={{ fontWeight: 900 }}>
+                  <input
+                    type="checkbox"
+                    checked={tiers[tier].enabled}
+                    onChange={(e) => updateTier(tier, { enabled: e.target.checked })}
+                  />{" "}
+                  {tier.toUpperCase()}
+                </label>
+
+                {tiers[tier].enabled && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginTop: 10 }}>
+                    <input
+                      placeholder="Install Cost Min ($)"
+                      onChange={(e) => updateTier(tier, { installCostMin: num(e.target.value) })}
+                    />
+                    <input
+                      placeholder="Install Cost Max ($)"
+                      onChange={(e) => updateTier(tier, { installCostMax: num(e.target.value) })}
+                    />
+                    <input
+                      placeholder="Efficiency Score (0–100)"
+                      onChange={(e) => updateTier(tier, { efficiencyScore: num(e.target.value) })}
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Incentives */}
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontWeight: 900, fontSize: 12, marginBottom: 6 }}>Attached Incentives</div>
+            {incentives.length === 0 ? (
+              <div style={{ color: "var(--muted)" }}>No incentives defined.</div>
+            ) : (
+              incentives.map((i) => (
+                <label key={i.id} style={{ display: "flex", gap: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={incentiveIds.includes(i.id)}
+                    onChange={() => toggleIncentive(i.id)}
+                  />
+                  {i.title} ({i.level})
+                </label>
+              ))
+            )}
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
             <button className="rei-btn" onClick={() => setMode("view")}>
               Cancel
             </button>
-            <button
-              className="rei-btn rei-btnPrimary"
-              disabled={!name.trim()}
-              style={{ opacity: name.trim() ? 1 : 0.5 }}
-              onClick={upsert}
-            >
+            <button className="rei-btn rei-btnPrimary" onClick={saveSystem}>
               {mode === "add" ? "Add System" : "Save Changes"}
             </button>
           </div>
         </div>
       )}
 
-      {/* List */}
-      <div className="rei-card">
-        {systems.length === 0 ? (
-          <div style={{ color: "var(--muted)" }}>
-            No catalog systems yet.
-          </div>
-        ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {systems.map((s) => (
-              <div
-                key={s.id}
-                style={{
-                  border: "1px solid var(--border)",
-                  borderRadius: 12,
-                  padding: 12,
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                }}
-              >
-                <div>
-                  <div style={{ fontWeight: 900 }}>{s.name}</div>
-                  <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                    {s.category} • {(s.highlights || []).join(" • ") || "—"}
-                  </div>
-                </div>
-
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button className="rei-btn" onClick={() => startEdit(s.id)}>
-                    Edit
-                  </button>
-                  <button className="rei-btn" onClick={() => remove(s.id)}>
-                    Delete
-                  </button>
-                </div>
+      {systems.length === 0 ? (
+        <div className="rei-card" style={{ color: "var(--muted)" }}>
+          No catalog systems yet.
+        </div>
+      ) : (
+        systems.map((s) => (
+          <div key={s.id} className="rei-card" style={{ display: "flex", justifyContent: "space-between" }}>
+            <div>
+              <div style={{ fontWeight: 900 }}>{s.name}</div>
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                {s.category} • Tiers:{" "}
+                {Object.entries(s.tiers)
+                  .filter(([, t]) => t.enabled)
+                  .map(([k]) => k)
+                  .join(", ")}
               </div>
-            ))}
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button className="rei-btn" onClick={() => startEdit(s)}>Edit</button>
+              <button className="rei-btn" onClick={() => remove(s.id)}>Delete</button>
+            </div>
           </div>
-        )}
-      </div>
+        ))
+      )}
     </div>
   );
 }
 
+/* ============================
+   Field helper
+============================ */
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label style={{ display: "grid", gap: 6 }}>
-      <div style={{ fontSize: 12, fontWeight: 900, color: "var(--muted)" }}>
-        {label}
-      </div>
+      <div style={{ fontSize: 12, fontWeight: 900, color: "var(--muted)" }}>{label}</div>
       {children}
     </label>
   );
