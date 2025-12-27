@@ -68,21 +68,23 @@ export default function NewJobPage() {
 
   const canSubmit = customerName.trim().length > 1;
 
-  useEffect(() => {
+    useEffect(() => {
     const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-    if (!key) {
-      // No key => page still works, just no autocomplete
-      return;
-    }
+    if (!key) return;
 
     let cancelled = false;
+    let placeChangedListener: any = null;
+
+    const cleanupPac = () => {
+      // Google injects the dropdown into <body>. Remove any leftovers on unmount/route-change.
+      document.querySelectorAll(".pac-container").forEach((el) => el.remove());
+    };
 
     loadGoogleMapsPlaces(key)
       .then(() => {
         if (cancelled) return;
         setGmapsReady(true);
 
-        // Initialize autocomplete once
         if (!addressRef.current) return;
         if (autocompleteRef.current) return;
         if (!window.google?.maps?.places?.Autocomplete) return;
@@ -93,17 +95,24 @@ export default function NewJobPage() {
           fields: ["address_components", "formatted_address"],
         });
 
-        ac.addListener("place_changed", () => {
-          const place = ac.getPlace?.();
-          const formatted = place?.formatted_address || "";
-          const comps = place?.address_components || [];
+        placeChangedListener = ac.addListener("place_changed", () => {
+          const place = ac.getPlace?.() || {};
+          const formatted = place.formatted_address || "";
+          const comps = place.address_components || [];
 
+          // Some addresses have postal_code + postal_code_suffix
           const postal = getComponent(comps, "postal_code");
+          const postalSuffix = getComponent(comps, "postal_code_suffix");
           const admin1 = getComponent(comps, "administrative_area_level_1"); // OR, WA, etc.
 
+          const fullZip = postal ? (postalSuffix ? `${postal}-${postalSuffix}` : postal) : "";
+
           if (formatted) setAddress(formatted);
-          if (postal) setZip(postal);
+          if (fullZip) setZip(fullZip);
           if (admin1) setStateCode(admin1);
+
+          // (Optional) If you want: when user selects an address, also close any stray dropdowns:
+          cleanupPac();
         });
 
         autocompleteRef.current = ac;
@@ -114,6 +123,15 @@ export default function NewJobPage() {
 
     return () => {
       cancelled = true;
+
+      // Remove the listener cleanly
+      if (placeChangedListener?.remove) placeChangedListener.remove();
+
+      // Clear ref so it can re-init if needed
+      autocompleteRef.current = null;
+
+      // Remove any injected dropdown DOM
+      cleanupPac();
     };
   }, []);
 
