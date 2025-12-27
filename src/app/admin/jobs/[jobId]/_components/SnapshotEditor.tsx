@@ -1,8 +1,4 @@
 "use client";
-function makeSnapshotId(systemId: string) {
-  const rand = Math.floor(Math.random() * 900000) + 100000;
-  return `snap_${systemId}_${rand}`;
-}
 
 import { useEffect, useMemo, useState } from "react";
 
@@ -11,6 +7,11 @@ import {
   upsertLocalSnapshot,
 } from "../../../_data/localSnapshots";
 import { MOCK_SYSTEMS, type CatalogSystem } from "../../../_data/mockSystems";
+
+function makeSnapshotId(systemId: string) {
+  const rand = Math.floor(Math.random() * 900000) + 100000;
+  return `snap_${systemId}_${rand}`;
+}
 
 /* ─────────────────────────────────────────────
    TYPES
@@ -22,9 +23,15 @@ type Props = {
     id: string;
     type: string;
     subtype: string;
-    ageYears: number;
+
+    // ✅ allow nulls because SnapshotDraft now supports nulls
+    ageYears: number | null;
+
     operational: "Yes" | "No";
-    wear: number;
+
+    // ✅ allow nulls because SnapshotDraft now supports nulls
+    wear: number | null;
+
     maintenance: "Good" | "Average" | "Poor";
   };
   snapshot?: SnapshotDraft | null;
@@ -60,9 +67,9 @@ export default function SnapshotEditor({
       existing: {
         type: existingSystem.type,
         subtype: existingSystem.subtype,
-        ageYears: existingSystem.ageYears,
+        ageYears: existingSystem.ageYears ?? null,
         operational: existingSystem.operational,
-        wear: existingSystem.wear,
+        wear: existingSystem.wear ?? null,
         maintenance: existingSystem.maintenance,
       },
 
@@ -89,9 +96,8 @@ export default function SnapshotEditor({
   const selectedCatalog: CatalogSystem | null = useMemo(() => {
     if (!working.suggested.catalogSystemId) return null;
     return (
-      catalogSystems.find(
-        (s) => s.id === working.suggested.catalogSystemId
-      ) || null
+      catalogSystems.find((s) => s.id === working.suggested.catalogSystemId) ||
+      null
     );
   }, [working.suggested.catalogSystemId, catalogSystems]);
 
@@ -163,43 +169,43 @@ export default function SnapshotEditor({
       </div>
 
       <div className="rei-formGrid">
+        {/* ✅ Age */}
         <Field label="Age (years)">
-      <input
-  className="rei-search"
-  type="number"
-  value={working.existing.ageYears ?? ""}
-  onChange={(e) => {
-    const v = e.target.value;
-    updateExisting("ageYears", v === "" ? null : Number(v));
-  }}
-/>
+          <input
+            className="rei-search"
+            type="number"
+            value={working.existing.ageYears ?? ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              updateExisting("ageYears", v === "" ? null : Number(v));
+            }}
+          />
+        </Field>
 
-       <Field label="Wear (1–5)">
-  <select
-    className="rei-search"
-    value={working.existing.wear ?? ""}
-    onChange={(e) => {
-      const v = e.target.value;
-      updateExisting("wear", v === "" ? null : Number(v));
-    }}
-  >
-    <option value="">—</option>
-    {[1, 2, 3, 4, 5].map((v) => (
-      <option key={v} value={v}>
-        {v}
-      </option>
-    ))}
-  </select>
-</Field>
-
+        {/* ✅ Wear */}
+        <Field label="Wear (1–5)">
+          <select
+            className="rei-search"
+            value={working.existing.wear ?? ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              updateExisting("wear", v === "" ? null : (Number(v) as any));
+            }}
+          >
+            <option value="">—</option>
+            {[1, 2, 3, 4, 5].map((v) => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+          </select>
+        </Field>
 
         <Field label="Operational">
           <select
             className="rei-search"
             value={working.existing.operational}
-            onChange={(e) =>
-              updateExisting("operational", e.target.value as any)
-            }
+            onChange={(e) => updateExisting("operational", e.target.value as any)}
           >
             <option value="Yes">Yes</option>
             <option value="No">No</option>
@@ -210,9 +216,7 @@ export default function SnapshotEditor({
           <select
             className="rei-search"
             value={working.existing.maintenance}
-            onChange={(e) =>
-              updateExisting("maintenance", e.target.value as any)
-            }
+            onChange={(e) => updateExisting("maintenance", e.target.value as any)}
           >
             <option value="Good">Good</option>
             <option value="Average">Average</option>
@@ -232,10 +236,7 @@ export default function SnapshotEditor({
             className="rei-search"
             value={working.suggested.catalogSystemId || ""}
             onChange={(e) =>
-              updateSuggested(
-                "catalogSystemId",
-                e.target.value || null
-              )
+              updateSuggested("catalogSystemId", e.target.value || null)
             }
           >
             <option value="">— Select system —</option>
@@ -250,10 +251,8 @@ export default function SnapshotEditor({
         <Field label="Tier">
           <select
             className="rei-search"
-            value={working.suggested.tier}
-            onChange={(e) =>
-              updateSuggested("tier", e.target.value as any)
-            }
+            value={working.suggested.tier ?? "better"}
+            onChange={(e) => updateSuggested("tier", e.target.value as any)}
           >
             <option value="good">Good</option>
             <option value="better">Better</option>
