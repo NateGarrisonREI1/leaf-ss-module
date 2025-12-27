@@ -1,7 +1,8 @@
 "use client";
 
-import { Incentive } from "../_data/incentivesModel";
-import { groupIncentivesByLevel } from "../_data/filterIncentivesForJob";
+import { Incentive } from "../_data/incentives/incentivesModel";
+import { groupIncentivesByLevel } from "../_data/incentives/filterIncentivesForJob";
+
 
 function money(n?: number) {
   if (typeof n !== "number" || !isFinite(n)) return null;
