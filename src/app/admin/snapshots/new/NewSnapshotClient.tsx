@@ -184,17 +184,18 @@ export default function NewSnapshotClient({
     const ageYears = toNumberOr((existingSystem as any)?.ageYears, 12);
     const wear = toNumberOr((existingSystem as any)?.wear, 3);
 
-    return calculateLeafPreview({
-      tier,
-      annualUtilitySpend: annual,
-      systemShare: share,
-      expectedLifeYears: life,
-      ageYears,
-      wear,
-      partialFailure,
-      installCostMin: tierCostMin,
-      installCostMax: tierCostMax,
-    });
+return calculateLeafPreview({
+  tier,
+  annualUtilitySpend: annual,
+  systemShare: share,
+  expectedLife: life,
+  age: ageYears,
+  wear,
+  partialFailure,
+  installCostMin: tierCostMin,
+  installCostMax: tierCostMax,
+});
+
   }, [
     annualUtilitySpend,
     systemShare,
