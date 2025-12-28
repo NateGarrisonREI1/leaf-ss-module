@@ -5,28 +5,23 @@ export type Range = { min: number; max: number; center: number };
 export type LeafPreviewInputs = {
   tier: LeafTierKey;
 
-  // existing system condition inputs
-  ageYears: number;           // years
-  wear: number;               // 1–5
-  expectedLifeYears: number;  // years
+  annualUtilitySpend: number; // $/yr
+  systemShare: number; // 0–1
+  expectedLife: number; // ✅ this must exist (years)
   partialFailure?: boolean;
 
-  // utility / bill context
-  annualUtilitySpend: number; // $
-  systemShare: number;        // 0–1
+  ageYears: number;
+  wear: number;
 
-  // optional install cost context (from catalog tier)
   installCostMin?: number;
   installCostMax?: number;
 };
 
 export type LeafPreviewResult = {
-  currentWaste: number;
-  recoverableWaste: number;
-
   annualSavings: Range;
   monthlySavings: Range;
+  paybackYears: Range;
 
-  // null if we don't have cost info or savings is ~0
-  paybackYears: Range | null;
+  currentWaste: number;
+  recoverableWaste: number;
 };
