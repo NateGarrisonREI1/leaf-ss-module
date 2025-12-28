@@ -313,7 +313,7 @@ if (!touched.payback)
   setEstPaybackYears(
     String(calc.paybackYearsRange.center.toFixed(1))
   );
-
+}
     
   // Auto-fill until user edits
   useEffect(() => {
