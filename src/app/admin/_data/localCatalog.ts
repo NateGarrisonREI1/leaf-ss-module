@@ -31,7 +31,7 @@ export type CatalogSystem = {
 };
 
 // ✅ KEEP YOUR EXISTING KEY so current data still loads
-const STORAGE_KEY = "LEAF_LOCAL_CATALOG";
+const STORAGE_KEY = "REI_LOCAL_CATALOG_V2";
 
 // Optional legacy keys (if you ever used others)
 const LEGACY_KEYS = [
