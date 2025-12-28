@@ -78,12 +78,13 @@ function pickDefaultNumber(val: any): string {
 }
 
 export default function NewSnapshotClient({
-  jobId,
-  systemId,
+  job,
+  system,
 }: {
-  jobId: string;
-  systemId: string;
+  job: Job;
+  system: any;
 }) {
+
   const router = useRouter();
 
   const job: Job | null = useMemo(() => {
