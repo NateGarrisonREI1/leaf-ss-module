@@ -1,27 +1,68 @@
 /**
  * Local Snapshots (Compatibility Layer)
  *
- * This file exists to preserve the local snapshot API surface
- * while the persistence and calculation engines are rebuilt.
+ * Goal: keep the app compiling + running while we rebuild
+ * the real domain model + persistence.
  *
- * ⚠️ All functions are intentionally no-op or in-memory.
- * ⚠️ Do NOT add business logic here.
+ * ✅ Exposes the legacy API expected by pages/components
+ * ✅ Stores data in-memory only
+ * ❌ No business logic here
  */
 
-/* ======================================================
- * TYPES
- * ====================================================== */
+export type LeafTierKey = "good" | "better" | "best";
 
+/** Minimal shape used by SnapshotEditor + pages */
 export type SnapshotDraft = {
   id: string;
   jobId?: string;
+  systemId?: string;
+
   title?: string;
 
-  // Temporary / transitional fields
-  baselineAnnualCost?: number;
-  baselineMonthlyCost?: number;
-  annualSavings?: number;
-  monthlySavings?: number;
+  existing?: {
+    type?: string;
+    subtype?: string;
+    ageYears?: number | null;
+    operational?: "Yes" | "No";
+    wear?: number | null;
+    maintenance?: "Good" | "Average" | "Poor";
+
+    label?: string;
+    statusPillText?: string;
+    annualCostRange?: { min: number; max: number };
+    carbonRange?: { min: number; max: number };
+    imageUrl?: string;
+  };
+
+  suggested?: {
+    catalogSystemId?: string | null;
+    name?: string;
+    estCost?: number | null;
+
+    estAnnualSavings?: number | null;
+    estPaybackYears?: number | null;
+
+    notes?: string;
+    tier?: LeafTierKey;
+
+    recommendedNameByTier?: Record<string, string>;
+    statusPillTextByTier?: Record<string, string>;
+    imageUrl?: string;
+
+    leafSSOverrides?: {
+      tiers?: Record<string, any>;
+    };
+  };
+
+  calculationInputs?: {
+    annualUtilitySpend?: number;
+    systemShare?: number;
+    expectedLife?: number;
+    partialFailure?: boolean;
+  };
+
+  // Allow future fields without breaking TS while we rebuild
+  [key: string]: any;
 
   createdAt?: string;
   updatedAt?: string;
@@ -51,7 +92,6 @@ export function snapshotsForJob(jobId: string): SnapshotDraft[] {
 
 export function upsertLocalSnapshot(snapshot: SnapshotDraft): SnapshotDraft {
   const index = _snapshots.findIndex((s) => s.id === snapshot.id);
-
   const now = new Date().toISOString();
 
   if (index >= 0) {
@@ -63,7 +103,7 @@ export function upsertLocalSnapshot(snapshot: SnapshotDraft): SnapshotDraft {
   } else {
     _snapshots.push({
       ...snapshot,
-      createdAt: now,
+      createdAt: snapshot.createdAt || now,
       updatedAt: now,
     });
   }
@@ -74,10 +114,6 @@ export function upsertLocalSnapshot(snapshot: SnapshotDraft): SnapshotDraft {
 export function deleteLocalSnapshot(snapshotId: string): void {
   _snapshots = _snapshots.filter((s) => s.id !== snapshotId);
 }
-
-/* ======================================================
- * LEGACY / SAFE NO-OPS
- * ====================================================== */
 
 /**
  * Previously persisted snapshots.
