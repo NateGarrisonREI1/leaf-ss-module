@@ -8,7 +8,7 @@ import { type Job, findLocalJob } from "../../_data/localJobs";
 import { upsertLocalSnapshot, type SnapshotDraft } from "../../_data/localSnapshots";
 import { loadLocalCatalog, type CatalogSystem, type LeafTierKey } from "../../_data/localCatalog";
 
-import { calculateLeafPreview } from "../../_data/leaf-calculations";
+import { calculateLeafPreview } from "../../_data/leafCalculations";
 
 // Incentives (two ways: explicit IDs OR rule-matcher fallback)
 import { loadIncentives, type Incentive } from "../../_data/incentives/incentivesModel";
