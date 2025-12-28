@@ -178,19 +178,26 @@ export default function NewSnapshotClient({
   const [partialFailure, setPartialFailure] = useState<boolean>(false);
 
   // Computed ranges from leafSSConfigRuntime
-  const calc = useMemo(() => {
-    const annual = toNumberOr(annualUtilitySpend, 2400);
-    const share = toNumberOr(systemShare, 0.4);
-    const life = toNumberOr(expectedLife, 15);
+const calc = useMemo(() => {
+  const annual = toNumberOr(annualUtilitySpend, 2400);
+  const share = toNumberOr(systemShare, 0.4);
+  const life = toNumberOr(expectedLife, 15);
 
-    return calculateLeafSavings({
-      annualUtilitySpend: annual,
-      systemShare: share,
-      tierKey: tier,
-      expectedUsefulLifeYears: life,
-      partialFailure,
-    });
-  }, [annualUtilitySpend, systemShare, expectedLife, tier, partialFailure]);
+  // match leafSSConfigRuntime signature
+  const age = toNumberOr((existingSystem as any)?.ageYears, 12);
+  const wear = toNumberOr((existingSystem as any)?.wear, 3);
+
+  return calculateLeafSavings({
+    annualUtilitySpend: annual,
+    systemShare: share,
+    tier,                 // ✅ correct key
+    expectedLife: life,   // ✅ correct key
+    age,
+    wear,
+    partialFailure,
+  });
+}, [annualUtilitySpend, systemShare, expectedLife, tier, partialFailure, existingSystem]);
+
 
   const computedAnnualMin = calc.annualSavingsRange.min;
   const computedAnnualMax = calc.annualSavingsRange.max;
