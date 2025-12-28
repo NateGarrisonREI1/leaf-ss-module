@@ -137,3 +137,6 @@ export function calculateLeafSnapshotPreview(input: LeafSnapshotCalcInputs): Lea
  */
 export const calculateLeafSavingsPreview = calculateLeafSnapshotPreview;
 export type { LeafTierKey };
+
+// ✅ alias for what NewSnapshotClient is importing
+export const calculateLeafPreview = calculateLeafSnapshotPreview;
