@@ -78,6 +78,8 @@ export default function NewSnapshotClient({
   const [annualUtilitySpend, setAnnualUtilitySpend] = useState("2400");
   const [systemShare, setSystemShare] = useState("0.4");
   const [expectedLife, setExpectedLife] = useState("15");
+
+  // kept for saving draft, but NOT passed to preview engine (LeafPreviewInput doesn't support it)
   const [partialFailure, setPartialFailure] = useState(false);
 
   // Optional install cost range from catalog tier config
@@ -87,15 +89,13 @@ export default function NewSnapshotClient({
   const tierCostMax =
     typeof tierCfg?.installCostMax === "number" ? tierCfg.installCostMax : undefined;
 
-  // Preview calc (IMPORTANT: do NOT pass tier until runtime type exports are stabilized)
-  // ALSO: LeafPreviewInput no longer supports 'wear' — do not pass it here.
+  // Preview calc (LeafPreviewInput is strict; only pass supported keys)
   const calc = useMemo(() => {
     return calculateLeafPreview({
       annualUtilitySpend: toNumberOr(annualUtilitySpend, 2400),
       systemShare: toNumberOr(systemShare, 0.4),
       expectedLife: toNumberOr(expectedLife, 15),
       ageYears: toNumberOr(existingSystem?.ageYears, 12),
-      partialFailure,
       installCostMin: tierCostMin,
       installCostMax: tierCostMax,
     });
@@ -104,7 +104,6 @@ export default function NewSnapshotClient({
     systemShare,
     expectedLife,
     existingSystem?.ageYears,
-    partialFailure,
     tierCostMin,
     tierCostMax,
   ]);
