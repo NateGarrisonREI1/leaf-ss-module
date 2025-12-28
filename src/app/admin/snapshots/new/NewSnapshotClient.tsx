@@ -6,9 +6,12 @@ import { useRouter } from "next/navigation";
 
 import { type Job, findLocalJob } from "../../_data/localJobs";
 import { upsertLocalSnapshot, type SnapshotDraft } from "../../_data/localSnapshots";
-import { loadLocalCatalog } from "../../_data/localCatalog";
+import { loadLocalCatalog, type CatalogSystem, type LeafTierKey } from "../../_data/localCatalog";
 
-// Incentives
+import { calculateLeafSavings } from "../../_data/leafSSConfigRuntime";
+
+// Incentives (two ways: explicit IDs OR rule-matcher fallback)
+import { loadIncentives, type Incentive } from "../../_data/incentives/incentivesModel";
 import {
   getIncentivesForSystemType,
   INCENTIVE_COPY,
@@ -16,6 +19,10 @@ import {
   type IncentiveResource,
   type IncentiveAmount,
 } from "../../_data/incentives/incentiveResolver";
+
+/* ─────────────────────────────────────────────
+   Helpers
+───────────────────────────────────────────── */
 
 function nowIso() {
   return new Date().toISOString();
@@ -28,6 +35,25 @@ function parseNum(v: string) {
   return Number.isFinite(n) ? n : null;
 }
 
+function toNumberOr(v: any, fallback: number) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function midpoint(min?: number, max?: number): number | null {
+  if (typeof min !== "number" || typeof max !== "number") return null;
+  return (min + max) / 2;
+}
+
+function pickDefaultNumber(val: any): string {
+  if (val === null || val === undefined) return "";
+  if (typeof val === "number" && Number.isFinite(val)) return String(val);
+  if (typeof val === "string") return val.replace(/[^0-9.]/g, "");
+  return "";
+}
+
+/* ---------- Incentive formatting (resolver style) ---------- */
+
 function formatAmount(amount?: IncentiveAmount): string {
   if (!amount) return "";
   if (amount.kind === "text") return amount.value;
@@ -36,7 +62,7 @@ function formatAmount(amount?: IncentiveAmount): string {
   return "";
 }
 
-function buildIncentivesNotesBlock(selected: IncentiveResource[]) {
+function buildIncentivesNotesBlockFromResolver(selected: IncentiveResource[]) {
   if (!selected.length) return "";
 
   const disclaimer = INCENTIVE_COPY.find((x) => x.key === "general_disclaimer")?.body ?? "";
@@ -67,13 +93,35 @@ function buildIncentivesNotesBlock(selected: IncentiveResource[]) {
   return lines.join("\n").trim();
 }
 
-// Helps safely read common catalog fields without hard-wiring schema
-function pickDefaultNumber(val: any): string {
-  if (val === null || val === undefined) return "";
-  if (typeof val === "number" && Number.isFinite(val)) return String(val);
-  if (typeof val === "string") return val.replace(/[^0-9.]/g, "");
-  return "";
+/* ---------- Incentive formatting (incentivesModel style) ---------- */
+
+function buildIncentivesNotesBlockFromIds(selected: Incentive[]) {
+  if (!selected.length) return "";
+
+  const lines: string[] = [];
+  lines.push("Incentives (auto-added)");
+  lines.push("");
+
+  for (const i of selected) {
+    lines.push(`- ${i.title} (${i.level})`);
+    if (i.valueText) lines.push(`  ${i.valueText}`);
+    if (i.url) lines.push(`  Link: ${i.url}`);
+  }
+
+  return lines.join("\n").trim();
 }
+
+function firstEnabledTier(sys: CatalogSystem | null): LeafTierKey {
+  const tiers = (sys as any)?.tiers as Partial<Record<LeafTierKey, any>> | undefined;
+  if (tiers?.good?.enabled) return "good";
+  if (tiers?.better?.enabled) return "better";
+  if (tiers?.best?.enabled) return "best";
+  return "good";
+}
+
+/* ─────────────────────────────────────────────
+   Component
+───────────────────────────────────────────── */
 
 export default function NewSnapshotClient({
   jobId,
@@ -88,24 +136,84 @@ export default function NewSnapshotClient({
     return jobId ? findLocalJob(jobId) ?? null : null;
   }, [jobId]);
 
-  const system = useMemo(() => {
+  const existingSystem = useMemo(() => {
     if (!job) return null;
-    return ((job as any).systems || []).find((s: any) => s.id === systemId) ?? null;
+    return (job.systems ?? []).find((s: any) => s.id === systemId) ?? null;
   }, [job, systemId]);
 
-  // ✅ REAL catalog only (localStorage)
-  const catalog = useMemo(() => loadLocalCatalog(), []);
+  // ✅ Load catalog as STATE (not useMemo) so it can refresh after edits
+  const [catalog, setCatalog] = useState<CatalogSystem[]>([]);
+  useEffect(() => {
+    setCatalog(loadLocalCatalog());
+
+    // keep it fresh if another tab modifies catalog
+    const onStorage = (e: StorageEvent) => {
+      if (!e.key) return;
+      // refresh on any key change (cheap enough for now)
+      setCatalog(loadLocalCatalog());
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   const [catalogId, setCatalogId] = useState<string>("");
-
   const selectedCatalog = useMemo(() => {
     if (!catalogId) return null;
-    return (catalog ?? []).find((c: any) => c.id === catalogId) ?? null;
+    return catalog.find((c: any) => c.id === catalogId) ?? null;
   }, [catalogId, catalog]);
 
-  // --- Incentives (only when a catalog system is selected) ---
-  const incentives: IncentiveResource[] = useMemo(() => {
+  // ✅ Option A: tier selection
+  const [tier, setTier] = useState<LeafTierKey>("good");
+
+  // when catalog changes, auto-select first enabled tier
+  useEffect(() => {
+    if (!selectedCatalog) return;
+    setTier(firstEnabledTier(selectedCatalog));
+  }, [catalogId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ✅ Option A: calculation inputs
+  const [annualUtilitySpend, setAnnualUtilitySpend] = useState<string>("2400");
+  const [systemShare, setSystemShare] = useState<string>("0.4"); // 40% default
+  const [expectedLife, setExpectedLife] = useState<string>("15");
+  const [partialFailure, setPartialFailure] = useState<boolean>(false);
+
+  // Computed ranges from leafSSConfigRuntime
+  const calc = useMemo(() => {
+    const annual = toNumberOr(annualUtilitySpend, 2400);
+    const share = toNumberOr(systemShare, 0.4);
+    const life = toNumberOr(expectedLife, 15);
+
+    return calculateLeafSavings({
+      annualUtilitySpend: annual,
+      systemShare: share,
+      tierKey: tier,
+      expectedUsefulLifeYears: life,
+      partialFailure,
+    });
+  }, [annualUtilitySpend, systemShare, expectedLife, tier, partialFailure]);
+
+  const computedAnnualMin = calc.annualSavingsRange.min;
+  const computedAnnualMax = calc.annualSavingsRange.max;
+  const computedPayMin = calc.paybackYearsRange.min;
+  const computedPayMax = calc.paybackYearsRange.max;
+
+  // --- Incentives ---
+  const [includeIncentivesInNotes, setIncludeIncentivesInNotes] = useState<boolean>(true);
+
+  // A) Preferred: incentives attached by IDs in the catalog system
+  const allIncentives = useMemo(() => loadIncentives(), []);
+  const attachedIncentives: Incentive[] = useMemo(() => {
+    const ids = (selectedCatalog as any)?.incentiveIds as string[] | undefined;
+    if (!selectedCatalog || !ids?.length) return [];
+    const set = new Set(ids);
+    return allIncentives.filter((i) => set.has(i.id));
+  }, [selectedCatalog, allIncentives]);
+
+  // B) Fallback: incentives matched by resolver rules/tags
+  const resolverMatched: IncentiveResource[] = useMemo(() => {
     if (!selectedCatalog) return [];
+    // if we already have attached IDs, prefer that and don't auto-match
+    if ((selectedCatalog as any)?.incentiveIds?.length) return [];
 
     const categoryKey = normalizeSystemType(String((selectedCatalog as any).category ?? ""));
     const tags = Array.isArray((selectedCatalog as any).tags)
@@ -114,25 +222,30 @@ export default function NewSnapshotClient({
 
     const ctxTags = [
       ...tags,
-      String((system as any)?.type ?? "").toLowerCase().trim(),
-      String((system as any)?.subtype ?? "").toLowerCase().trim(),
+      String((existingSystem as any)?.type ?? "").toLowerCase().trim(),
+      String((existingSystem as any)?.subtype ?? "").toLowerCase().trim(),
     ].filter(Boolean);
 
     return getIncentivesForSystemType(categoryKey, { tags: ctxTags });
-  }, [selectedCatalog, system]);
+  }, [selectedCatalog, existingSystem]);
 
-  const [includeIncentivesInNotes, setIncludeIncentivesInNotes] = useState<boolean>(true);
+  // UI selection of which incentives are included (both modes)
   const [selectedIncentiveIds, setSelectedIncentiveIds] = useState<string[]>([]);
-
-  // Auto-select all incentives whenever the list changes
   useEffect(() => {
-    setSelectedIncentiveIds(incentives.map((x) => x.id));
-  }, [catalogId, incentives.length]); // eslint-disable-line react-hooks/exhaustive-deps
+    // auto-select all available (attached preferred; else resolver)
+    if (attachedIncentives.length) setSelectedIncentiveIds(attachedIncentives.map((x) => x.id));
+    else setSelectedIncentiveIds(resolverMatched.map((x) => x.id));
+  }, [catalogId, attachedIncentives.length, resolverMatched.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const selectedIncentives = useMemo(() => {
+  const selectedAttached = useMemo(() => {
     const set = new Set(selectedIncentiveIds);
-    return incentives.filter((x) => set.has(x.id));
-  }, [incentives, selectedIncentiveIds]);
+    return attachedIncentives.filter((x) => set.has(x.id));
+  }, [attachedIncentives, selectedIncentiveIds]);
+
+  const selectedResolver = useMemo(() => {
+    const set = new Set(selectedIncentiveIds);
+    return resolverMatched.filter((x) => set.has(x.id));
+  }, [resolverMatched, selectedIncentiveIds]);
 
   // --- Form state ---
   const [suggestedName, setSuggestedName] = useState<string>("");
@@ -141,18 +254,22 @@ export default function NewSnapshotClient({
   const [estPaybackYears, setEstPaybackYears] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
 
-  const backHref = job ? `/admin/jobs/${(job as any).id}` : "/admin/jobs";
+  // "touched" flags so we don't stomp user edits
+  const [touched, setTouched] = useState<{ cost: boolean; savings: boolean; payback: boolean }>({
+    cost: false,
+    savings: false,
+    payback: false,
+  });
+
+  const backHref = job ? `/admin/jobs/${job.id}` : "/admin/jobs";
 
   function applyCatalogDefaults() {
     if (!selectedCatalog) return;
 
+    // name
     setSuggestedName((prev) => (prev.trim() ? prev : String((selectedCatalog as any).name ?? "")));
 
-    const da = (selectedCatalog as any).defaultAssumptions ?? {};
-    setEstCost((prev) => (prev.trim() ? prev : pickDefaultNumber(da.estCost)));
-    setEstAnnualSavings((prev) => (prev.trim() ? prev : pickDefaultNumber(da.estAnnualSavings)));
-    setEstPaybackYears((prev) => (prev.trim() ? prev : pickDefaultNumber(da.estPaybackYears)));
-
+    // notes from highlights
     const highlights = Array.isArray((selectedCatalog as any).highlights) ? (selectedCatalog as any).highlights : [];
     const hlLine = highlights.length ? highlights.join(" • ") : "";
 
@@ -163,10 +280,58 @@ export default function NewSnapshotClient({
       if (base.includes(hlLine)) return base;
       return `${base}\n\n${hlLine}`;
     });
+
+    // Tier cost range -> midpoint
+    const tierCfg = ((selectedCatalog as any).tiers?.[tier] ?? null) as any;
+    const mid = midpoint(tierCfg?.installCostMin, tierCfg?.installCostMax);
+    if (!touched.cost) {
+      if (mid !== null) setEstCost(String(Math.round(mid)));
+      else {
+        // legacy fallback
+        const da = (selectedCatalog as any).defaultAssumptions ?? {};
+        setEstCost((prev) => (prev.trim() ? prev : pickDefaultNumber(da.estCost)));
+      }
+    }
+
+    // Calculated savings/payback midpoints
+    if (!touched.savings) setEstAnnualSavings(String(Math.round((computedAnnualMin + computedAnnualMax) / 2)));
+    if (!touched.payback) setEstPaybackYears(String(((computedPayMin + computedPayMax) / 2).toFixed(1)));
   }
 
+  // Auto-refresh computed numbers into empty fields until user edits
+  useEffect(() => {
+    if (!selectedCatalog) return;
+
+    if (!touched.savings && !estAnnualSavings.trim()) {
+      setEstAnnualSavings(String(Math.round((computedAnnualMin + computedAnnualMax) / 2)));
+    }
+    if (!touched.payback && !estPaybackYears.trim()) {
+      setEstPaybackYears(String(((computedPayMin + computedPayMax) / 2).toFixed(1)));
+    }
+
+    // cost from tier midpoint if empty
+    const tierCfg = ((selectedCatalog as any).tiers?.[tier] ?? null) as any;
+    const mid = midpoint(tierCfg?.installCostMin, tierCfg?.installCostMax);
+    if (!touched.cost && !estCost.trim() && mid !== null) {
+      setEstCost(String(Math.round(mid)));
+    }
+  }, [
+    selectedCatalog,
+    tier,
+    computedAnnualMin,
+    computedAnnualMax,
+    computedPayMin,
+    computedPayMax,
+    touched.cost,
+    touched.savings,
+    touched.payback,
+    estCost,
+    estAnnualSavings,
+    estPaybackYears,
+  ]);
+
   function onSave() {
-    if (!job || !system) return;
+    if (!job || !existingSystem) return;
 
     if (!suggestedName.trim()) {
       alert("Suggested system name is required.");
@@ -174,9 +339,13 @@ export default function NewSnapshotClient({
     }
 
     const userNotes = notes.trim();
+
     const incentivesBlock =
-      includeIncentivesInNotes && selectedIncentives.length
-        ? buildIncentivesNotesBlock(selectedIncentives)
+      includeIncentivesInNotes &&
+      (selectedAttached.length || selectedResolver.length)
+        ? selectedAttached.length
+          ? buildIncentivesNotesBlockFromIds(selectedAttached)
+          : buildIncentivesNotesBlockFromResolver(selectedResolver)
         : "";
 
     const finalNotes =
@@ -186,18 +355,27 @@ export default function NewSnapshotClient({
 
     const draft: SnapshotDraft = {
       id: `snap_${Math.random().toString(16).slice(2)}_${Date.now()}`,
-      jobId: (job as any).id,
-      systemId: system.id,
+      jobId: job.id,
+      systemId: existingSystem.id,
       createdAt: nowIso(),
       updatedAt: nowIso(),
 
+      // ✅ store calculation inputs + chosen tier
+      tierKey: tier,
+      calculationInputs: {
+        annualUtilitySpend: toNumberOr(annualUtilitySpend, 2400),
+        systemShare: toNumberOr(systemShare, 0.4),
+        expectedUsefulLifeYears: toNumberOr(expectedLife, 15),
+        partialFailure,
+      },
+
       existing: {
-        type: system.type ?? "",
-        subtype: system.subtype ?? "",
-        ageYears: system.ageYears ?? null,
-        operational: system.operational ?? "",
-        wear: system.wear ?? null,
-        maintenance: system.maintenance ?? "",
+        type: existingSystem.type ?? "",
+        subtype: existingSystem.subtype ?? "",
+        ageYears: existingSystem.ageYears ?? null,
+        operational: existingSystem.operational ?? "",
+        wear: existingSystem.wear ?? null,
+        maintenance: existingSystem.maintenance ?? "",
       },
 
       suggested: {
@@ -211,10 +389,13 @@ export default function NewSnapshotClient({
     };
 
     upsertLocalSnapshot(draft);
-    router.push(`/admin/jobs/${(job as any).id}?snapSaved=1`);
+    router.push(`/admin/jobs/${job.id}?snapSaved=1`);
   }
 
-  // Guards
+  /* ─────────────────────────────────────────────
+     Guards
+  ────────────────────────────────────────────── */
+
   if (!jobId || !systemId) {
     return (
       <div className="rei-card" style={{ display: "grid", gap: 10 }}>
@@ -243,7 +424,7 @@ export default function NewSnapshotClient({
     );
   }
 
-  if (!system) {
+  if (!existingSystem) {
     return (
       <div className="rei-card" style={{ display: "grid", gap: 10 }}>
         <div style={{ fontWeight: 900, fontSize: 16 }}>Existing system not found</div>
@@ -257,6 +438,16 @@ export default function NewSnapshotClient({
     );
   }
 
+  /* ─────────────────────────────────────────────
+     Main UI
+  ────────────────────────────────────────────── */
+
+  const tierCfg: any = selectedCatalog ? (selectedCatalog as any).tiers?.[tier] : null;
+  const tierCostLabel =
+    tierCfg?.installCostMin != null && tierCfg?.installCostMax != null
+      ? `$${tierCfg.installCostMin.toLocaleString()}–$${tierCfg.installCostMax.toLocaleString()}`
+      : "—";
+
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <div className="rei-card">
@@ -265,7 +456,7 @@ export default function NewSnapshotClient({
             <div style={{ fontWeight: 900, fontSize: 16 }}>New LEAF System Snapshot</div>
             <div style={{ color: "var(--muted)", marginTop: 6 }}>
               Job: <b>{(job as any).customerName ?? "—"}</b> —{" "}
-              <span style={{ opacity: 0.75 }}>{(job as any).reportId ?? (job as any).id}</span>
+              <span style={{ opacity: 0.75 }}>{(job as any).reportId ?? job.id}</span>
             </div>
           </div>
 
@@ -281,22 +472,22 @@ export default function NewSnapshotClient({
         <div style={{ border: "1px solid #e5e7eb", borderRadius: 14, padding: 12, background: "white" }}>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
             <div>
-              <span style={{ fontWeight: 800 }}>Type:</span> {system.type}
+              <span style={{ fontWeight: 800 }}>Type:</span> {existingSystem.type}
             </div>
             <div>
-              <span style={{ fontWeight: 800 }}>Subtype:</span> {system.subtype}
+              <span style={{ fontWeight: 800 }}>Subtype:</span> {existingSystem.subtype}
             </div>
             <div>
-              <span style={{ fontWeight: 800 }}>Age:</span> {system.ageYears ?? "—"} yrs
+              <span style={{ fontWeight: 800 }}>Age:</span> {existingSystem.ageYears ?? "—"} yrs
             </div>
             <div>
-              <span style={{ fontWeight: 800 }}>Operational:</span> {system.operational ?? "—"}
+              <span style={{ fontWeight: 800 }}>Operational:</span> {existingSystem.operational ?? "—"}
             </div>
             <div>
-              <span style={{ fontWeight: 800 }}>Wear:</span> {system.wear ?? "—"}/5
+              <span style={{ fontWeight: 800 }}>Wear:</span> {existingSystem.wear ?? "—"}/5
             </div>
             <div>
-              <span style={{ fontWeight: 800 }}>Maintenance:</span> {system.maintenance ?? "—"}
+              <span style={{ fontWeight: 800 }}>Maintenance:</span> {existingSystem.maintenance ?? "—"}
             </div>
           </div>
 
@@ -310,6 +501,7 @@ export default function NewSnapshotClient({
         <div style={{ fontWeight: 900, marginBottom: 10 }}>Suggested Upgrade (Proposed)</div>
 
         <div style={{ display: "grid", gap: 12 }}>
+          {/* Catalog picker */}
           <div style={{ display: "grid", gap: 8 }}>
             <div style={{ fontWeight: 700 }}>Choose from Systems Catalog (optional)</div>
 
@@ -355,7 +547,7 @@ export default function NewSnapshotClient({
 
             {selectedCatalog ? (
               <div style={{ color: "var(--muted)", fontSize: 12 }}>
-                From catalog • Incentive type: <b>{normalizeSystemType(String((selectedCatalog as any).category ?? ""))}</b>
+                From catalog • Type: <b>{normalizeSystemType(String((selectedCatalog as any).category ?? ""))}</b>
                 {Array.isArray((selectedCatalog as any).tags) && (selectedCatalog as any).tags.length ? (
                   <>
                     {" "}
@@ -365,16 +557,90 @@ export default function NewSnapshotClient({
               </div>
             ) : (
               <div style={{ color: "var(--muted)", fontSize: 12 }}>
-                Select a suggested upgrade to see matching incentives.
+                Select a suggested upgrade to see tier + incentives.
               </div>
             )}
           </div>
 
-          {/* Incentives */}
-          {selectedCatalog && incentives.length ? (
+          {/* Tier + calc inputs */}
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 14, padding: 12, background: "white" }}>
+            <div style={{ fontWeight: 900, marginBottom: 8 }}>Snapshot Calculation Inputs</div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+              <label style={{ display: "grid", gap: 6 }}>
+                <div style={{ fontWeight: 700 }}>Tier</div>
+                <select
+                  value={tier}
+                  onChange={(e) => setTier(e.target.value as LeafTierKey)}
+                  style={{ padding: 10, borderRadius: 10, border: "1px solid #e5e7eb", background: "white" }}
+                >
+                  <option value="good">Good</option>
+                  <option value="better">Better</option>
+                  <option value="best">Best</option>
+                </select>
+                <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                  Catalog tier cost range: <b>{tierCostLabel}</b>
+                </div>
+              </label>
+
+              <label style={{ display: "grid", gap: 6 }}>
+                <div style={{ fontWeight: 700 }}>Annual utility spend ($/yr)</div>
+                <input
+                  value={annualUtilitySpend}
+                  onChange={(e) => setAnnualUtilitySpend(e.target.value)}
+                  style={{ padding: 10, borderRadius: 10, border: "1px solid #e5e7eb" }}
+                />
+              </label>
+
+              <label style={{ display: "grid", gap: 6 }}>
+                <div style={{ fontWeight: 700 }}>System share of bill (0–1)</div>
+                <input
+                  value={systemShare}
+                  onChange={(e) => setSystemShare(e.target.value)}
+                  style={{ padding: 10, borderRadius: 10, border: "1px solid #e5e7eb" }}
+                />
+              </label>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginTop: 10 }}>
+              <label style={{ display: "grid", gap: 6 }}>
+                <div style={{ fontWeight: 700 }}>Expected life (yrs)</div>
+                <input
+                  value={expectedLife}
+                  onChange={(e) => setExpectedLife(e.target.value)}
+                  style={{ padding: 10, borderRadius: 10, border: "1px solid #e5e7eb" }}
+                />
+              </label>
+
+              <label style={{ display: "flex", gap: 10, alignItems: "center", paddingTop: 28 }}>
+                <input type="checkbox" checked={partialFailure} onChange={(e) => setPartialFailure(e.target.checked)} />
+                <div style={{ fontWeight: 700 }}>Partial failure / broken system</div>
+              </label>
+
+              <div style={{ color: "var(--muted)", fontSize: 12, paddingTop: 8 }}>
+                Computed savings range:{" "}
+                <b>
+                  ${computedAnnualMin.toLocaleString()}–${computedAnnualMax.toLocaleString()}/yr
+                </b>
+                <br />
+                Computed payback range:{" "}
+                <b>
+                  {computedPayMin.toFixed(1)}–{computedPayMax.toFixed(1)} yrs
+                </b>
+              </div>
+            </div>
+          </div>
+
+          {/* Incentives (attached preferred; resolver fallback) */}
+          {selectedCatalog && (attachedIncentives.length || resolverMatched.length) ? (
             <div style={{ border: "1px solid #e5e7eb", borderRadius: 14, padding: 12, background: "white" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                <div style={{ fontWeight: 900 }}>Incentives (matched to suggested upgrade)</div>
+                <div style={{ fontWeight: 900 }}>
+                  Incentives{" "}
+                  <span style={{ color: "var(--muted)", fontWeight: 700 }}>
+                    {attachedIncentives.length ? "(from catalog)" : "(auto-matched)"}
+                  </span>
+                </div>
 
                 <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700 }}>
                   <input
@@ -387,12 +653,17 @@ export default function NewSnapshotClient({
               </div>
 
               <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                {incentives.map((r) => {
-                  const checked = selectedIncentiveIds.includes(r.id);
-                  const amt = formatAmount(r.amount);
+                {(attachedIncentives.length ? attachedIncentives : resolverMatched).map((r: any) => {
+                  const id = r.id;
+                  const checked = selectedIncentiveIds.includes(id);
+
+                  const title = attachedIncentives.length ? r.title : r.programName;
+                  const subtitle = attachedIncentives.length ? (r.valueText || "") : (r.shortBlurb || "");
+                  const extra = attachedIncentives.length ? "" : formatAmount(r.amount);
+
                   return (
                     <label
-                      key={r.id}
+                      key={id}
                       style={{
                         display: "grid",
                         gridTemplateColumns: "20px 1fr",
@@ -409,18 +680,20 @@ export default function NewSnapshotClient({
                         checked={checked}
                         onChange={(e) => {
                           const next = new Set(selectedIncentiveIds);
-                          if (e.target.checked) next.add(r.id);
-                          else next.delete(r.id);
+                          if (e.target.checked) next.add(id);
+                          else next.delete(id);
                           setSelectedIncentiveIds(Array.from(next));
                         }}
                         style={{ marginTop: 2 }}
                       />
                       <div>
                         <div style={{ fontWeight: 900 }}>
-                          {r.programName}
-                          {amt ? <span style={{ fontWeight: 700, color: "#374151" }}> — {amt}</span> : null}
+                          {title}
+                          {extra ? <span style={{ fontWeight: 700, color: "#374151" }}> — {extra}</span> : null}
                         </div>
-                        <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>{r.shortBlurb}</div>
+                        {subtitle ? (
+                          <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>{subtitle}</div>
+                        ) : null}
                       </div>
                     </label>
                   );
@@ -429,13 +702,13 @@ export default function NewSnapshotClient({
             </div>
           ) : null}
 
-          {selectedCatalog && !incentives.length ? (
+          {selectedCatalog && !attachedIncentives.length && !resolverMatched.length ? (
             <div style={{ color: "var(--muted)", fontSize: 12 }}>
-              No incentives matched this suggested upgrade. (Check your Incentives rules/tags.)
+              No incentives matched this suggested upgrade. (Attach incentives to the catalog system OR check rules/tags.)
             </div>
           ) : null}
 
-          {/* Full form fields */}
+          {/* Snapshot fields */}
           <label style={{ display: "grid", gap: 6 }}>
             <div style={{ fontWeight: 700 }}>
               Suggested system name <span style={{ color: "#ef4444" }}>(required)</span>
@@ -446,6 +719,9 @@ export default function NewSnapshotClient({
               placeholder="e.g., High-efficiency gas furnace"
               style={{ padding: 10, borderRadius: 10, border: "1px solid #e5e7eb" }}
             />
+            <div style={{ color: "var(--muted)", fontSize: 12 }}>
+              Tip: pick a catalog system + tier, then tweak the displayed name if needed.
+            </div>
           </label>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
@@ -453,30 +729,51 @@ export default function NewSnapshotClient({
               <div style={{ fontWeight: 700 }}>Est. Cost ($)</div>
               <input
                 value={estCost}
-                onChange={(e) => setEstCost(e.target.value)}
+                onChange={(e) => {
+                  setTouched((t) => ({ ...t, cost: true }));
+                  setEstCost(e.target.value);
+                }}
                 placeholder="e.g., 12000"
                 style={{ padding: 10, borderRadius: 10, border: "1px solid #e5e7eb" }}
               />
+              <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                Tier range: <b>{tierCostLabel}</b>
+              </div>
             </label>
 
             <label style={{ display: "grid", gap: 6 }}>
               <div style={{ fontWeight: 700 }}>Est. Savings / yr ($)</div>
               <input
                 value={estAnnualSavings}
-                onChange={(e) => setEstAnnualSavings(e.target.value)}
+                onChange={(e) => {
+                  setTouched((t) => ({ ...t, savings: true }));
+                  setEstAnnualSavings(e.target.value);
+                }}
                 placeholder="e.g., 350"
                 style={{ padding: 10, borderRadius: 10, border: "1px solid #e5e7eb" }}
               />
+              <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                Computed: <b>${computedAnnualMin.toLocaleString()}–${computedAnnualMax.toLocaleString()}/yr</b>
+              </div>
             </label>
 
             <label style={{ display: "grid", gap: 6 }}>
               <div style={{ fontWeight: 700 }}>Est. Payback (yrs)</div>
               <input
                 value={estPaybackYears}
-                onChange={(e) => setEstPaybackYears(e.target.value)}
+                onChange={(e) => {
+                  setTouched((t) => ({ ...t, payback: true }));
+                  setEstPaybackYears(e.target.value);
+                }}
                 placeholder="e.g., 12"
                 style={{ padding: 10, borderRadius: 10, border: "1px solid #e5e7eb" }}
               />
+              <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                Computed:{" "}
+                <b>
+                  {computedPayMin.toFixed(1)}–{computedPayMax.toFixed(1)} yrs
+                </b>
+              </div>
             </label>
           </div>
 
