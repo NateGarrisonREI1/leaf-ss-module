@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { type Job, findLocalJob } from "../../_data/localJobs";
@@ -67,6 +67,7 @@ function buildIncentivesNotesBlock(selected: IncentiveResource[]) {
   return lines.join("\n").trim();
 }
 
+// Helps safely read common catalog fields without hard-wiring schema
 function pickDefaultNumber(val: any): string {
   if (val === null || val === undefined) return "";
   if (typeof val === "number" && Number.isFinite(val)) return String(val);
@@ -83,17 +84,18 @@ export default function NewSnapshotClient({
 }) {
   const router = useRouter();
 
-  // ✅ Read localStorage ONLY in the client component
   const job: Job | null = useMemo(() => {
     return jobId ? findLocalJob(jobId) ?? null : null;
   }, [jobId]);
 
   const system = useMemo(() => {
     if (!job) return null;
-    return (job.systems ?? []).find((s: any) => s.id === systemId) ?? null;
+    return ((job as any).systems || []).find((s: any) => s.id === systemId) ?? null;
   }, [job, systemId]);
 
+  // ✅ REAL catalog only (localStorage)
   const catalog = useMemo(() => loadLocalCatalog(), []);
+
   const [catalogId, setCatalogId] = useState<string>("");
 
   const selectedCatalog = useMemo(() => {
@@ -101,12 +103,13 @@ export default function NewSnapshotClient({
     return (catalog ?? []).find((c: any) => c.id === catalogId) ?? null;
   }, [catalogId, catalog]);
 
+  // --- Incentives (only when a catalog system is selected) ---
   const incentives: IncentiveResource[] = useMemo(() => {
     if (!selectedCatalog) return [];
 
-    const categoryKey = normalizeSystemType(String(selectedCatalog.category ?? ""));
-    const tags = Array.isArray(selectedCatalog.tags)
-      ? selectedCatalog.tags.map((t: any) => String(t || "").toLowerCase().trim()).filter(Boolean)
+    const categoryKey = normalizeSystemType(String((selectedCatalog as any).category ?? ""));
+    const tags = Array.isArray((selectedCatalog as any).tags)
+      ? (selectedCatalog as any).tags.map((t: any) => String(t || "").toLowerCase().trim()).filter(Boolean)
       : [];
 
     const ctxTags = [
@@ -121,6 +124,7 @@ export default function NewSnapshotClient({
   const [includeIncentivesInNotes, setIncludeIncentivesInNotes] = useState<boolean>(true);
   const [selectedIncentiveIds, setSelectedIncentiveIds] = useState<string[]>([]);
 
+  // Auto-select all incentives whenever the list changes
   useEffect(() => {
     setSelectedIncentiveIds(incentives.map((x) => x.id));
   }, [catalogId, incentives.length]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -130,27 +134,26 @@ export default function NewSnapshotClient({
     return incentives.filter((x) => set.has(x.id));
   }, [incentives, selectedIncentiveIds]);
 
+  // --- Form state ---
   const [suggestedName, setSuggestedName] = useState<string>("");
   const [estCost, setEstCost] = useState<string>("");
   const [estAnnualSavings, setEstAnnualSavings] = useState<string>("");
   const [estPaybackYears, setEstPaybackYears] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
 
-  const backHref = job ? `/admin/jobs/${job.id}` : "/admin/jobs";
+  const backHref = job ? `/admin/jobs/${(job as any).id}` : "/admin/jobs";
 
   function applyCatalogDefaults() {
     if (!selectedCatalog) return;
 
-    setSuggestedName((prev) => (prev.trim() ? prev : String(selectedCatalog.name ?? "")));
+    setSuggestedName((prev) => (prev.trim() ? prev : String((selectedCatalog as any).name ?? "")));
 
     const da = (selectedCatalog as any).defaultAssumptions ?? {};
     setEstCost((prev) => (prev.trim() ? prev : pickDefaultNumber(da.estCost)));
     setEstAnnualSavings((prev) => (prev.trim() ? prev : pickDefaultNumber(da.estAnnualSavings)));
     setEstPaybackYears((prev) => (prev.trim() ? prev : pickDefaultNumber(da.estPaybackYears)));
 
-    const highlights = Array.isArray((selectedCatalog as any).highlights)
-      ? (selectedCatalog as any).highlights
-      : [];
+    const highlights = Array.isArray((selectedCatalog as any).highlights) ? (selectedCatalog as any).highlights : [];
     const hlLine = highlights.length ? highlights.join(" • ") : "";
 
     setNotes((prev) => {
@@ -183,7 +186,7 @@ export default function NewSnapshotClient({
 
     const draft: SnapshotDraft = {
       id: `snap_${Math.random().toString(16).slice(2)}_${Date.now()}`,
-      jobId: job.id,
+      jobId: (job as any).id,
       systemId: system.id,
       createdAt: nowIso(),
       updatedAt: nowIso(),
@@ -208,7 +211,7 @@ export default function NewSnapshotClient({
     };
 
     upsertLocalSnapshot(draft);
-    router.push(`/admin/jobs/${job.id}?snapSaved=1`);
+    router.push(`/admin/jobs/${(job as any).id}?snapSaved=1`);
   }
 
   // Guards
@@ -254,7 +257,6 @@ export default function NewSnapshotClient({
     );
   }
 
-  // UI
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <div className="rei-card">
@@ -263,7 +265,7 @@ export default function NewSnapshotClient({
             <div style={{ fontWeight: 900, fontSize: 16 }}>New LEAF System Snapshot</div>
             <div style={{ color: "var(--muted)", marginTop: 6 }}>
               Job: <b>{(job as any).customerName ?? "—"}</b> —{" "}
-              <span style={{ opacity: 0.75 }}>{(job as any).reportId ?? job.id}</span>
+              <span style={{ opacity: 0.75 }}>{(job as any).reportId ?? (job as any).id}</span>
             </div>
           </div>
 
@@ -353,11 +355,11 @@ export default function NewSnapshotClient({
 
             {selectedCatalog ? (
               <div style={{ color: "var(--muted)", fontSize: 12 }}>
-                From catalog • Incentive type: <b>{normalizeSystemType(String(selectedCatalog.category ?? ""))}</b>
-                {Array.isArray(selectedCatalog.tags) && selectedCatalog.tags.length ? (
+                From catalog • Incentive type: <b>{normalizeSystemType(String((selectedCatalog as any).category ?? ""))}</b>
+                {Array.isArray((selectedCatalog as any).tags) && (selectedCatalog as any).tags.length ? (
                   <>
                     {" "}
-                    • tags: <b>{selectedCatalog.tags.join(", ")}</b>
+                    • tags: <b>{(selectedCatalog as any).tags.join(", ")}</b>
                   </>
                 ) : null}
               </div>
@@ -368,6 +370,7 @@ export default function NewSnapshotClient({
             )}
           </div>
 
+          {/* Incentives */}
           {selectedCatalog && incentives.length ? (
             <div style={{ border: "1px solid #e5e7eb", borderRadius: 14, padding: 12, background: "white" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
@@ -432,6 +435,7 @@ export default function NewSnapshotClient({
             </div>
           ) : null}
 
+          {/* Full form fields */}
           <label style={{ display: "grid", gap: 6 }}>
             <div style={{ fontWeight: 700 }}>
               Suggested system name <span style={{ color: "#ef4444" }}>(required)</span>
@@ -442,9 +446,6 @@ export default function NewSnapshotClient({
               placeholder="e.g., High-efficiency gas furnace"
               style={{ padding: 10, borderRadius: 10, border: "1px solid #e5e7eb" }}
             />
-            <div style={{ color: "var(--muted)", fontSize: 12 }}>
-              Tip: use catalog + tweak later. Or type a custom upgrade name.
-            </div>
           </label>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
