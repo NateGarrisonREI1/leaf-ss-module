@@ -115,7 +115,7 @@ export default function NewSnapshotClient({
 
 
     return getIncentivesForSystemType(categoryKey, { tags: ctxTags });
-  }, [selectedCatalog, existingSystem]);
+  }, [selectedCatalog, system]);
 
   const [includeIncentivesInNotes, setIncludeIncentivesInNotes] = useState<boolean>(true);
   const [selectedIncentiveIds, setSelectedIncentiveIds] = useState<string[]>([]);
