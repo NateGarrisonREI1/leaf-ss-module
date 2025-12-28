@@ -303,12 +303,18 @@ const computedPayMax = calc.paybackYearsRange.max;
         setEstCost((prev) => (prev.trim() ? prev : pickDefaultNumber(da.estCost)));
       }
     }
+// Savings/payback from calc preview
+if (!touched.savings)
+  setEstAnnualSavings(
+    String(Math.round(calc.annualSavingsRange.center))
+  );
 
-    // Savings/payback from calc preview
-    if (!touched.savings) setEstAnnualSavings(String(Math.round(calc.annualSavings.center)));
-    if (!touched.payback && calc.paybackYears) setEstPaybackYears(String(calc.paybackYears.center.toFixed(1)));
-  }
+if (!touched.payback)
+  setEstPaybackYears(
+    String(calc.paybackYearsRange.center.toFixed(1))
+  );
 
+    
   // Auto-fill until user edits
   useEffect(() => {
     if (!selectedCatalog) return;
