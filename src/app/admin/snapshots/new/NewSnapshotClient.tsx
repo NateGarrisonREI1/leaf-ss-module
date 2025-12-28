@@ -208,8 +208,9 @@ return calculateLeafPreview({
     tierCostMax,
   ]);
 
-  const computedAnnualMin = Math.round(calc.annualSavings.min);
-  const computedAnnualMax = Math.round(calc.annualSavings.max);
+  const computedAnnualMin = Math.round(calc.annualSavingsRange.min);
+const computedAnnualMax = Math.round(calc.annualSavingsRange.max);
+
 
   const computedPayMin = calc.paybackYears ? calc.paybackYears.min : null;
   const computedPayMax = calc.paybackYears ? calc.paybackYears.max : null;
