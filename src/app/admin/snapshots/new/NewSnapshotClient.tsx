@@ -196,8 +196,6 @@ export default function NewSnapshotClient({
       createdAt: nowIso(),
       updatedAt: nowIso(),
 
-      tierKey: tier,
-
       calculationInputs: {
         annualUtilitySpend: toNumberOr(annualUtilitySpend, 2400),
         systemShare: toNumberOr(systemShare, 0.4),
