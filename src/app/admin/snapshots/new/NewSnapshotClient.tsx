@@ -9,10 +9,13 @@ import { createSnapshotDraft, upsertLocalSnapshot } from "../../_data/localSnaps
 // Catalog (localStorage-backed)
 import { loadLocalCatalog, type CatalogSystem } from "../../_data/localCatalog";
 
-// IMPORTANT: use the SAME LeafTierKey as the calculation engine uses
-import { type LeafTierKey } from "../../_data/leafSSConfigRuntime";
-
 import { calculateLeafPreview } from "../../_data/leafCalculations";
+
+/* ─────────────────────────────────────────────
+   Types (local, to avoid runtime export drift)
+───────────────────────────────────────────── */
+
+type LeafTierKey = "good" | "better" | "best";
 
 /* ─────────────────────────────────────────────
    Helpers
@@ -80,13 +83,15 @@ export default function NewSnapshotClient({
 
   // Optional install cost range from catalog tier config
   const tierCfg: any = selectedCatalog ? (selectedCatalog as any).tiers?.[tier] : null;
-  const tierCostMin = typeof tierCfg?.installCostMin === "number" ? tierCfg.installCostMin : undefined;
-  const tierCostMax = typeof tierCfg?.installCostMax === "number" ? tierCfg.installCostMax : undefined;
+  const tierCostMin =
+    typeof tierCfg?.installCostMin === "number" ? tierCfg.installCostMin : undefined;
+  const tierCostMax =
+    typeof tierCfg?.installCostMax === "number" ? tierCfg.installCostMax : undefined;
 
-  // Preview calc (used for UI + to ensure hooks aren’t unused)
+  // Preview calc (kept for UI + build cleanliness)
   const calc = useMemo(() => {
     return calculateLeafPreview({
-      tier,
+      tier, // <-- matches engine expectation
       annualUtilitySpend: toNumberOr(annualUtilitySpend, 2400),
       systemShare: toNumberOr(systemShare, 0.4),
       expectedLife: toNumberOr(expectedLife, 15),
@@ -132,7 +137,7 @@ export default function NewSnapshotClient({
 
       suggested: {
         catalogSystemId: catalogId || null,
-        tier,
+        tier: tier as any, // localSnapshots tier type comes from its own module; keep v0 flexible
         name: selectedCatalog?.name ? String(selectedCatalog.name) : "Proposed Upgrade",
         notes: "",
       },
@@ -159,7 +164,9 @@ export default function NewSnapshotClient({
 
       <div style={{ display: "grid", gap: 10 }}>
         <label style={{ display: "grid", gap: 6 }}>
-          <div style={{ fontSize: 12, color: "#6b7280" }}>Choose proposed system (catalog)</div>
+          <div style={{ fontSize: 12, color: "#6b7280" }}>
+            Choose proposed system (catalog)
+          </div>
           <select
             className="rei-input"
             value={catalogId}
@@ -176,7 +183,11 @@ export default function NewSnapshotClient({
 
         <label style={{ display: "grid", gap: 6 }}>
           <div style={{ fontSize: 12, color: "#6b7280" }}>Tier</div>
-          <select className="rei-input" value={tier} onChange={(e) => setTier(e.target.value as LeafTierKey)}>
+          <select
+            className="rei-input"
+            value={tier}
+            onChange={(e) => setTier(e.target.value as LeafTierKey)}
+          >
             <option value="good">Good</option>
             <option value="better">Better</option>
             <option value="best">Best</option>
@@ -228,13 +239,18 @@ export default function NewSnapshotClient({
           <div style={{ fontWeight: 800 }}>Preview</div>
           <div style={{ fontSize: 13, color: "#374151" }}>
             Annual savings: ${Math.round(calc.annualSavingsRange.center).toLocaleString()}{" "}
-            (range ${Math.round(calc.annualSavingsRange.min).toLocaleString()}–${Math.round(calc.annualSavingsRange.max).toLocaleString()})
+            (range ${Math.round(calc.annualSavingsRange.min).toLocaleString()}–$
+            {Math.round(calc.annualSavingsRange.max).toLocaleString()})
           </div>
           <div style={{ fontSize: 13, color: "#374151" }}>
             Monthly savings: ${Math.round(calc.monthlySavingsRange.center).toLocaleString()}
           </div>
           <div style={{ fontSize: 13, color: "#374151" }}>
-            Payback: {calc.paybackYearsRange.center ? calc.paybackYearsRange.center.toFixed(1) : "—"} yrs
+            Payback:{" "}
+            {Number.isFinite(calc.paybackYearsRange.center)
+              ? calc.paybackYearsRange.center.toFixed(1)
+              : "—"}{" "}
+            yrs
           </div>
         </div>
       </div>
