@@ -234,7 +234,7 @@ export default function NewSnapshotClient({
       <div className="rei-card" style={{ display: "grid", gap: 10 }}>
         <div style={{ fontWeight: 900, fontSize: 16 }}>Job not found</div>
         <div style={{ color: "var(--muted)" }}>
-          No local job exists with id: <code>{jobId}</code>
+          No local job exists with id: <code>{job?.id ?? "unknown"}</code>
         </div>
         <Link className="rei-btn" href="/admin/jobs" style={{ width: "fit-content" }}>
           ← Back to Jobs
