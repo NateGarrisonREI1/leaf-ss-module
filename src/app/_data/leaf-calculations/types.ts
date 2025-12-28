@@ -1,17 +1,21 @@
-import { LeafTierKey } from "../leafSSConfigRuntime";
+import type { LeafTierKey } from "../localCatalog";
 
 export type ExistingSystemInputs = {
   ageYears: number;
-  wear: number;              // 1–5
+  wear: number; // 1–5
   expectedLifeYears: number;
   partialFailure?: boolean;
   annualUtilitySpend: number;
-  systemShare: number;       // 0–1
+  systemShare: number; // 0–1
 };
 
 export type CatalogTierInputs = {
   tier: LeafTierKey;
-  efficiencyScore?: number;  // 0–100
+  /**
+   * 0–100 “strength” of improvement.
+   * This is a placeholder until we replace with real physics/engineering calcs.
+   */
+  efficiencyScore?: number;
 };
 
 export type LeafCalculationInput = {
@@ -20,27 +24,11 @@ export type LeafCalculationInput = {
 };
 
 export type LeafCalculationResult = {
-  // Waste
   currentWaste: number;
   recoverableWaste: number;
 
-  // Savings
-  annualSavings: {
-    min: number;
-    center: number;
-    max: number;
-  };
+  annualSavings: { min: number; center: number; max: number };
+  monthlySavings: { min: number; center: number; max: number };
 
-  monthlySavings: {
-    min: number;
-    center: number;
-    max: number;
-  };
-
-  // Payback
-  paybackYears: {
-    min: number;
-    center: number;
-    max: number;
-  };
+  paybackYears: { min: number; center: number; max: number };
 };
